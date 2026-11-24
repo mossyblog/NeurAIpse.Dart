@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge, Button } from "./primitives.tsx";
-import { Copy, Crosshair, EyeOff, Move, RotateCcw, Undo2 } from "lucide-react";
+import { Check, Copy, Crosshair, EyeOff, Move, RotateCcw, Undo2 } from "lucide-react";
 import { REARRANGE_NOT_FOUND, rearrangeSummary } from "../core/rearrange-output.ts";
 import type { Annotation } from "../core/types.ts";
 import { FloatingPanel, KbdHint, SectionLabel } from "./chrome.tsx";
@@ -32,11 +32,30 @@ export type RearrangePanelProps = {
  */
 export function RearrangePanel(props: RearrangePanelProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    },
+    [],
+  );
+
+  const handleCopy = () => {
+    props.onCopy();
+    setCopied(true);
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => {
+      copyTimer.current = null;
+      setCopied(false);
+    }, 1500);
+  };
 
   const footer = (
-    <Button variant="outline" size="sm" className="w-full" data-annotate-panel-copy disabled={props.rows.length === 0} onClick={props.onCopy}>
-      <Copy />
-      Copy
+    <Button variant="outline" size="sm" className="w-full" data-annotate-panel-copy disabled={props.rows.length === 0} onClick={handleCopy}>
+      {copied ? <Check /> : <Copy />}
+      {copied ? "Copied" : "Copy"}
     </Button>
   );
 
@@ -50,7 +69,7 @@ export function RearrangePanel(props: RearrangePanelProps) {
       title={props.selectedName || "Rearrange"}
       subtitle={props.selectedCount ? "Drag to move · handles resize" : "Click an element · drag a box to select"}
       titleDataAttr="data-annotate-panel-element"
-      count={props.rows.length > 0 ? props.rows.length : undefined}
+      count={props.selectedCount > 1 ? props.selectedCount : undefined}
       collapsible
       collapsed={collapsed}
       onToggleCollapse={() => setCollapsed((c) => !c)}
@@ -62,7 +81,9 @@ export function RearrangePanel(props: RearrangePanelProps) {
     >
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
-          <SectionLabel>Rearrangements ({props.rows.length})</SectionLabel>
+          <SectionLabel meta={<span className="font-mono text-[11px] text-muted-foreground tabular-nums">{props.rows.length}</span>}>
+            Rearrangements
+          </SectionLabel>
           {props.rows.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border/70 px-3 py-4 text-center text-xs text-muted-foreground">
               No rearrangements yet.

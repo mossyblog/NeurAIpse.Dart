@@ -73,7 +73,7 @@ export const LayoutPalette = forwardRef<HTMLDivElement, LayoutPaletteProps>(func
               </button>
             )}
           </div>
-          <div className="flex flex-wrap gap-1" role="group" aria-label="Component categories">
+          <div className="flex flex-nowrap gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="group" aria-label="Component categories">
             {CATEGORIES.map((cat) => {
               const active = category === cat;
               return (
@@ -83,7 +83,7 @@ export const LayoutPalette = forwardRef<HTMLDivElement, LayoutPaletteProps>(func
                   aria-pressed={active}
                   onClick={() => setCategory(cat)}
                   className={cn(
-                    "h-6 cursor-pointer rounded-md px-2 text-[11px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                    "h-6 shrink-0 cursor-pointer rounded-md px-2 text-[11px] font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
                     active
                       ? "bg-primary text-primary-foreground shadow-2xs"
                       : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -114,17 +114,17 @@ export const LayoutPalette = forwardRef<HTMLDivElement, LayoutPaletteProps>(func
                     title={`${item.label} (${item.width}×${item.height})`}
                     onPointerDown={(event) => props.onPointerDownItem(item, event)}
                     className={cn(
-                      "flex cursor-grab touch-none flex-col items-stretch gap-1.5 rounded-lg bg-background/70 p-2 text-left ring-1 ring-foreground/[0.08] transition-all outline-none select-none hover:bg-muted/70 hover:ring-foreground/15 focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing dark:bg-background/40 dark:ring-white/[0.08]",
+                      "group flex cursor-grab touch-none flex-col items-stretch gap-1.5 rounded-lg bg-background/70 p-2 text-left ring-1 ring-foreground/[0.08] transition-all outline-none select-none hover:bg-muted/70 hover:ring-foreground/15 focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing dark:bg-background/40 dark:ring-white/[0.08]",
                       props.armed === item.type && "bg-muted ring-2 ring-primary",
                     )}
                   >
-                    <span className="flex h-9 items-center justify-center rounded-md bg-muted/40 p-1">
+                    <span className="relative flex h-9 items-center justify-center rounded-md bg-muted/40 p-1">
                       <Wireframe type={item.type} width={item.width} height={item.height} />
+                      <span className="pointer-events-none absolute right-1 bottom-0.5 rounded bg-background/80 px-1 font-mono text-[9px] leading-tight text-muted-foreground opacity-0 tabular-nums backdrop-blur-xs transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                        {`${item.width}×${item.height}`}
+                      </span>
                     </span>
-                    <span className="flex items-baseline justify-between gap-1">
-                      <span className="truncate text-[11px] font-medium text-foreground">{item.label}</span>
-                      <span className="shrink-0 font-mono text-[9px] text-muted-foreground tabular-nums">{`${item.width}×${item.height}`}</span>
-                    </span>
+                    <span className="truncate text-[11px] font-medium text-foreground">{item.label}</span>
                   </button>
                 ))}
               </div>

@@ -411,6 +411,9 @@ export function LayoutMode(props: LayoutModeProps) {
           const rect = rectFor(p);
           const isSelected = interactive && live.includes(p.id);
           const label = componentLabel(p.placement.componentType);
+          const markerInset = rect.x - window.scrollX < 32;
+          const actionsBelow = rect.y - window.scrollY < 44;
+          const actionsLeft = rect.x + rect.width - window.scrollX < 140;
           return (
             <div
               key={p.id}
@@ -463,13 +466,20 @@ export function LayoutMode(props: LayoutModeProps) {
               <span
                 aria-hidden
                 data-annotate-placement-marker={index + 1}
-                className="absolute top-0 right-full mr-2 flex size-6 items-center justify-center rounded-md font-mono text-[11px] font-semibold text-white tabular-nums shadow-sm ring-2 ring-background"
+                className={cn(
+                  "absolute flex size-6 items-center justify-center rounded-md font-mono text-[11px] font-semibold text-white tabular-nums shadow-sm ring-2 ring-background",
+                  markerInset ? "top-1.5 left-1.5" : "top-0 right-full mr-2",
+                )}
                 style={{ backgroundColor: props.accent, textShadow: "0 1px 1px rgba(0, 0, 0, 0.3)" }}
               >
                 {index + 1}
               </span>
               {p.comment && (
-                <span aria-hidden data-annotate-placement-has-comment="" className={cn(PILL_CLASS, "absolute top-7 right-full mr-2 flex size-6 items-center justify-center")}>
+                <span
+                  aria-hidden
+                  data-annotate-placement-has-comment=""
+                  className={cn(PILL_CLASS, "absolute flex size-6 items-center justify-center", markerInset ? "top-1.5 left-9" : "top-7 right-full mr-2")}
+                >
                   <MessageSquare className="size-3" />
                 </span>
               )}
@@ -479,18 +489,29 @@ export function LayoutMode(props: LayoutModeProps) {
                     <span
                       key={handle}
                       data-annotate-resize-handle={handle}
+                      aria-label={`Resize ${handle}`}
                       onPointerDown={(event) => {
                         if (event.button !== 0) return;
                         begin({ kind: "resize", start: { x: event.clientX, y: event.clientY }, id: p.id, handle, origin: placementRect(p, window.innerWidth), moved: false }, event);
                       }}
-                      className="pointer-events-auto absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-[3px] bg-background shadow-xs ring-2 transition-transform hover:scale-125"
-                      style={{ ...HANDLE_POSITION[handle], ["--tw-ring-color" as string]: props.accent }}
-                    />
+                      className="group pointer-events-auto absolute flex size-6 -translate-x-1/2 -translate-y-1/2 touch-none items-center justify-center"
+                      style={HANDLE_POSITION[handle]}
+                    >
+                      <span
+                        className="size-2.5 rounded-[3px] bg-background shadow-xs ring-2 transition-transform group-hover:scale-125"
+                        style={{ ["--tw-ring-color" as string]: props.accent }}
+                      />
+                    </span>
                   ))}
                   <div
                     data-annotate-placement-actions=""
                     onPointerDown={(event) => event.stopPropagation()}
-                    className={cn(SURFACE_CLASS, "pointer-events-auto absolute right-0 bottom-full mb-2 flex items-center gap-0.5 rounded-lg p-1")}
+                    className={cn(
+                      SURFACE_CLASS,
+                      "pointer-events-auto absolute flex items-center gap-0.5 rounded-lg p-1",
+                      actionsBelow ? "top-full mt-2" : "bottom-full mb-2",
+                      actionsLeft ? "left-0" : "right-0",
+                    )}
                   >
                     <Button variant="ghost" size="icon-xs" aria-label="Edit text" title="Edit text (double-click)" data-annotate-placement-action="text" onClick={() => setEditing(p.id)}>
                       <Type />

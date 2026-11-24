@@ -605,6 +605,7 @@ export function RearrangeMode({ ctx }: { ctx: RearrangeContext }) {
       <RearrangeOverlay
         color={ctx.color}
         boxes={boxes}
+        selectedCount={selection.length}
         hover={hoverBox}
         guides={view?.guides ?? []}
         lines={view?.lines ?? []}
