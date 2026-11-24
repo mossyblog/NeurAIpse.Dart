@@ -15,7 +15,7 @@ export const PILL_CLASS =
 
 /** Shared compact input and select styling inside annotate panels. */
 export const FIELD_CLASS =
-  "h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-2xs transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 aria-invalid:border-destructive";
+  "h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-2xs transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 aria-invalid:border-destructive";
 
 /** Subtle hairline separator between control groups. */
 export function ToolbarDivider({
@@ -229,7 +229,11 @@ export function FloatingPanel({
                 )}
               </>
             ) : (
-              <span {...titleAttrs} className="truncate text-[13px] leading-tight font-semibold text-foreground">
+              <span
+                {...titleAttrs}
+                title={title}
+                className="truncate text-[13px] leading-tight font-semibold text-foreground"
+              >
                 {title}
               </span>
             )}
@@ -259,12 +263,20 @@ export function FloatingPanel({
           </div>
         </div>
         {hasEyebrow && (
-          <span {...titleAttrs} className="truncate text-[13px] leading-tight font-semibold text-foreground">
+          <span
+            {...titleAttrs}
+            title={title}
+            className="truncate text-[13px] leading-tight font-semibold text-foreground"
+          >
             {title}
           </span>
         )}
         {subtitle && (
-          <span {...subtitleAttrs} className="truncate font-mono text-[11px] leading-snug text-muted-foreground">
+          <span
+            {...subtitleAttrs}
+            title={subtitle}
+            className="truncate font-mono text-[11px] leading-snug text-muted-foreground"
+          >
             {subtitle}
           </span>
         )}

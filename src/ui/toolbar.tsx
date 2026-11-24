@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode, type Ref } from "react";
 import {
-  Kbd,
   Toolbar as ToolbarPrimitive,
   ToolbarButton as ToolbarButtonPrimitive,
 } from "./primitives.tsx";
@@ -35,6 +34,7 @@ import {
   GripHorizontal,
   LayoutGrid,
   LoaderCircle,
+  MessageSquare,
   MousePointerClick,
   Move,
   PanelLeft,
@@ -100,6 +100,7 @@ type DockButtonProps = {
   onFocusItem: (index: number) => void;
   onBlurItem: (index: number) => void;
   label: string;
+  tooltip?: string;
   shortcut?: string;
   pressed?: boolean;
   disabled?: boolean;
@@ -128,6 +129,7 @@ function NotchDockButton({
   onFocusItem,
   onBlurItem,
   label,
+  tooltip,
   shortcut,
   pressed,
   disabled,
@@ -138,7 +140,7 @@ function NotchDockButton({
   className,
   children,
 }: DockButtonProps) {
-  const tip = sendState && sendState !== "idle" ? SEND_LABELS[sendState] : label;
+  const tip = sendState && sendState !== "idle" ? SEND_LABELS[sendState] : (tooltip ?? label);
   const isRight = side === "right";
   const activeStyle =
     tone === "mode"
@@ -173,7 +175,6 @@ function NotchDockButton({
         aria-label={label}
         aria-pressed={pressed}
         aria-keyshortcuts={shortcut}
-        title={shortcut ? `${tip} (${shortcut})` : tip}
         data-send-state={sendState}
         data-dock-item={index}
         data-dock-factor="0.00"
@@ -222,7 +223,7 @@ function NotchDockButton({
           className={cn(
             PILL_CLASS,
             "pointer-events-none absolute top-1/2 z-40 flex -translate-y-1/2 items-center gap-1.5 px-2 py-1 text-[11px] leading-none font-medium whitespace-nowrap",
-            isRight ? "right-full mr-4" : "left-full ml-4",
+            isRight ? "right-full mr-5" : "left-full ml-5",
           )}
         >
           <span>{tip}</span>
@@ -296,7 +297,7 @@ const SUB_MODES: { value: InspectorSubMode; label: string; title: string }[] = [
 const MODE_META: Record<Exclude<ToolMode, "annotate">, { label: string; dot: string; hint?: string }> = {
   spacing: { label: "Spacing", dot: "bg-[var(--annotate-marker-green)]" },
   type: { label: "Type", dot: "bg-[var(--annotate-marker-purple)]" },
-  color: { label: "Colour", dot: "bg-[var(--annotate-marker-blue)]", hint: "Click to pick colour" },
+  color: { label: "Color", dot: "bg-[var(--annotate-marker-blue)]", hint: "Click to pick color" },
   layout: { label: "Layout", dot: "bg-[var(--annotate-marker-cyan)]", hint: "Click or drag components" },
   rearrange: { label: "Rearrange", dot: "bg-[var(--annotate-marker-orange)]", hint: "Drag to move · Del hides" },
 };
@@ -723,6 +724,14 @@ export function Toolbar(props: ToolbarProps) {
     }
   };
 
+  const handleGripPointerEnter = () => {
+    if (props.dragging) return;
+    pointerRelYRef.current = null;
+    setHoveredIndex(null);
+    const hasLayout = (notchElRef.current?.getBoundingClientRect().height ?? 0) > 0;
+    setTargets(null, null, !hasLayout);
+  };
+
   const activeTooltipIndex = !props.dragging ? (hoveredIndex ?? focusedIndex) : null;
 
   const sharedDockProps = (index: number) => ({
@@ -767,17 +776,11 @@ export function Toolbar(props: ToolbarProps) {
         onPointerMove={handleDockPointerMove}
         onPointerLeave={handleDockPointerLeave}
         className={cn(
-          "pointer-events-auto fixed z-30 flex flex-col items-center gap-1 overflow-visible border-y border-solid py-5",
+          "pointer-events-auto fixed z-30 flex flex-col items-center gap-1 overflow-visible border-y border-solid px-2.5 py-5",
           gooey.frame
             ? "bg-[var(--annotate-notch-bg)] text-popover-foreground border-[var(--annotate-notch-border)] shadow-[var(--annotate-notch-shadow)]"
             : "bg-transparent text-popover-foreground border-transparent shadow-none",
-          "transition-[padding] duration-150 ease-out motion-reduce:transition-none",
           isRight ? "right-0 rounded-l-[18px]" : "left-0 rounded-r-[18px]",
-          dockHovered && !props.dragging
-            ? isRight
-              ? "pr-2.5 pl-3"
-              : "pl-2.5 pr-3"
-            : "px-2",
         )}
       >
         {gooey.frame && (
@@ -795,10 +798,20 @@ export function Toolbar(props: ToolbarProps) {
             title="Drag vertically to reposition · Drag across screen to switch side"
             data-annotate-toolbar-grip=""
             className={cn(
-              "mb-1.5 flex h-4 w-6 shrink-0 touch-none items-center justify-center rounded-md text-muted-foreground/55 transition-colors outline-none hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40",
+              "mb-1 flex h-6 w-full shrink-0 touch-none items-center justify-center rounded-md text-muted-foreground/55 transition-colors outline-none hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
               props.dragging ? "cursor-grabbing" : "cursor-grab active:cursor-grabbing",
             )}
-            {...props.dragHandlers}
+            onPointerEnter={(event) => {
+              event.stopPropagation();
+              handleGripPointerEnter();
+            }}
+            onPointerDown={props.dragHandlers.onPointerDown}
+            onPointerMove={(event) => {
+              if (!props.dragging) event.stopPropagation();
+              props.dragHandlers?.onPointerMove(event);
+            }}
+            onPointerUp={props.dragHandlers.onPointerUp}
+            onPointerCancel={props.dragHandlers.onPointerCancel}
           >
             <GripHorizontal aria-hidden className="size-3.5" />
           </button>
@@ -851,7 +864,7 @@ export function Toolbar(props: ToolbarProps) {
           <NotchDockButton
             {...sharedDockProps(3)}
             tone="mode"
-            label="Colour inspector"
+            label="Color inspector"
             shortcut="K"
             pressed={mode === "color"}
             onClick={() => props.onSelectMode?.(mode === "color" ? "annotate" : "color")}
@@ -920,6 +933,7 @@ export function Toolbar(props: ToolbarProps) {
           <NotchDockButton
             {...sharedDockProps(9)}
             label="Send Annotations"
+            tooltip={!props.sendAvailable ? "Send Annotations · Set webhook or MCP" : undefined}
             shortcut="S"
             disabled={nothing || !props.sendAvailable || props.sendState !== "idle"}
             onClick={props.onSend}
@@ -966,7 +980,7 @@ export function Toolbar(props: ToolbarProps) {
           >
             <Settings />
           </NotchDockButton>
-          <NotchDockButton {...sharedDockProps(13)} label="Exit" onClick={props.onExit}>
+          <NotchDockButton {...sharedDockProps(13)} label="Exit" shortcut="Esc" onClick={props.onExit}>
             <X />
           </NotchDockButton>
         </div>
@@ -1051,45 +1065,47 @@ export function Toolbar(props: ToolbarProps) {
             {hasCounts && (
               <div className="flex items-center gap-1 rounded-md bg-muted/65 px-1.5 py-0.5 ring-1 ring-inset ring-foreground/[0.05] dark:ring-white/[0.08]">
                 {props.annotationCount > 0 && (
-                  <Kbd
+                  <span
                     aria-label={`${props.annotationCount} annotations`}
-                    className="h-4 min-w-4 bg-transparent px-1 font-mono text-[11px] font-semibold tabular-nums text-foreground"
+                    title="Annotations"
+                    className="inline-flex h-4 min-w-4 items-center gap-1 px-1 font-mono text-[11px] font-semibold tabular-nums text-foreground select-none [&_svg]:size-3 [&_svg]:text-muted-foreground"
                   >
+                    <MessageSquare aria-hidden />
                     {props.annotationCount}
-                  </Kbd>
+                  </span>
                 )}
                 {(props.styleChangeCount ?? 0) > 0 && (
-                  <Kbd
+                  <span
                     data-style-change-count={props.styleChangeCount}
                     aria-label={`${props.styleChangeCount} style changes`}
                     title="Style changes and measurements"
-                    className="h-4 bg-transparent px-1 font-mono text-[11px] font-semibold tabular-nums text-foreground"
+                    className="inline-flex h-4 items-center gap-1 px-1 font-mono text-[11px] font-semibold tabular-nums text-foreground select-none [&_svg]:size-3 [&_svg]:text-muted-foreground"
                   >
                     <Pipette aria-hidden />
                     {props.styleChangeCount}
-                  </Kbd>
+                  </span>
                 )}
                 {(props.rearrangeCount ?? 0) > 0 && (
-                  <Kbd
+                  <span
                     data-rearrange-count={props.rearrangeCount}
                     aria-label={`${props.rearrangeCount} rearrangements`}
                     title="Rearrangements"
-                    className="h-4 bg-transparent px-1 font-mono text-[11px] font-semibold tabular-nums text-foreground"
+                    className="inline-flex h-4 items-center gap-1 px-1 font-mono text-[11px] font-semibold tabular-nums text-foreground select-none [&_svg]:size-3 [&_svg]:text-muted-foreground"
                   >
                     <Move aria-hidden />
                     {props.rearrangeCount}
-                  </Kbd>
+                  </span>
                 )}
                 {(props.placementCount ?? 0) > 0 && (
-                  <Kbd
+                  <span
                     data-placement-count={props.placementCount}
                     aria-label={`${props.placementCount} layout placements`}
                     title="Layout placements"
-                    className="h-4 bg-transparent px-1 font-mono text-[11px] font-semibold tabular-nums text-foreground"
+                    className="inline-flex h-4 items-center gap-1 px-1 font-mono text-[11px] font-semibold tabular-nums text-foreground select-none [&_svg]:size-3 [&_svg]:text-muted-foreground"
                   >
                     <LayoutGrid aria-hidden />
                     {props.placementCount}
-                  </Kbd>
+                  </span>
                 )}
               </div>
             )}

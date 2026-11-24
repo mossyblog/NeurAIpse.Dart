@@ -57,7 +57,7 @@ import { pendingItems, type InspectorContext } from "./inspector-context.ts";
 import { SpacingInspector } from "./spacing-inspector.tsx";
 import { TypeInspector } from "./type-inspector.tsx";
 import { useStyleChanges } from "./use-style-changes.ts";
-import { useShadowSurface, type Surface } from "./shadow-surface.ts";
+import { isFromSurface, useShadowSurface, type Surface } from "./shadow-surface.ts";
 import { Toolbar } from "./toolbar.tsx";
 import { useAnnotations } from "./use-annotations.ts";
 import { useDragPosition } from "./use-drag-position.ts";
@@ -226,6 +226,15 @@ export function Annotate({
   const [setEscape] = useState(() => (handler: (() => boolean) | null) => {
     inspectorEscape.current = handler;
   });
+  /** Innermost-first Escape hook for Settings subviews & open scrubber dropdowns. */
+  const settingsEscape = useRef<(() => boolean) | null>(null);
+  const [setSettingsEscape] = useState(() => (handler: (() => boolean) | null) => {
+    settingsEscape.current = handler;
+  });
+  const settingsOpenRef = useRef(settingsOpen);
+  settingsOpenRef.current = settingsOpen;
+  const [settingsPopoverEl, setSettingsPopoverEl] = useState<HTMLDivElement | null>(null);
+  const [settingsHeight, setSettingsHeight] = useState(440);
   const timers = useRef<number[]>([]);
   /** Latest list and route, read after the clipboard await. */
   const latest = useRef({ route, annotations });
@@ -312,6 +321,66 @@ export function Annotate({
   });
   useEffect(() => () => timers.current.forEach((id) => window.clearTimeout(id)), []);
   useEffect(() => () => unfreezeRef.current?.(), []);
+
+  // Measure actual Settings popover height so viewport clamping stays accurate across views.
+  useEffect(() => {
+    if (!settingsPopoverEl) return;
+    const measure = () => {
+      const h = settingsPopoverEl.getBoundingClientRect().height;
+      if (h > 0) setSettingsHeight((prev) => (Math.abs(prev - h) < 1 ? prev : h));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const h = entries[0]?.contentRect.height ?? settingsPopoverEl.getBoundingClientRect().height;
+      if (h > 0) setSettingsHeight((prev) => (Math.abs(prev - h) < 1 ? prev : h));
+    });
+    observer.observe(settingsPopoverEl);
+    return () => observer.disconnect();
+  }, [settingsPopoverEl]);
+
+  // Dismiss Settings on outside page click without triggering element picking or page actions.
+  useEffect(() => {
+    if (!active) return;
+    let swallowClick = false;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!settingsOpenRef.current) return;
+      if (isFromSurface(event, surface)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      swallowClick = true;
+      setSettingsOpen(false);
+    };
+    const onFollowUp = (event: Event) => {
+      if (!swallowClick || isFromSurface(event, surface)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.type === "click") swallowClick = false;
+    };
+    const windows = [window, ...frameWindows];
+    for (const win of windows) {
+      try {
+        win.addEventListener("pointerdown", onPointerDown, true);
+        win.addEventListener("pointerup", onFollowUp, true);
+        win.addEventListener("mouseup", onFollowUp, true);
+        win.addEventListener("click", onFollowUp, true);
+      } catch {
+        // Frame gone.
+      }
+    }
+    return () => {
+      for (const win of windows) {
+        try {
+          win.removeEventListener("pointerdown", onPointerDown, true);
+          win.removeEventListener("pointerup", onFollowUp, true);
+          win.removeEventListener("mouseup", onFollowUp, true);
+          win.removeEventListener("click", onFollowUp, true);
+        } catch {
+          // Frame gone.
+        }
+      }
+    };
+  }, [active, frameWindows, surface]);
 
   // Pending multi-select outlines follow the page while it scrolls.
   useEffect(() => {
@@ -430,6 +499,7 @@ export function Annotate({
 
   const openNew = (result: ElementCapture, point: Point, target?: Element) => {
     setHover(null);
+    setSettingsOpen(false);
     setPopup({
       mode: "new",
       route,
@@ -598,15 +668,27 @@ export function Annotate({
   };
 
   const onEscape = () => {
-    // Inspector first: Esc drops pins and the preview and returns to Annotate (spec 2).
-    // Lines clears its pins on the first Esc (spec 14.4).
-    // Layout steps back too: text edit, comment, armed ghost, selection, then the mode.
-    if ((mode === "spacing" || mode === "layout" || mode === "rearrange") && inspectorEscape.current?.()) return;
-    if (mode !== "annotate") selectMode("annotate");
-    else if (popup) closePopup();
-    else if (multi) setMulti(null);
-    else if (settingsOpen) setSettingsOpen(false);
-    else deactivate();
+    // Innermost-first: open scrubber dropdowns / Settings subviews -> Settings -> Popup ->
+    // active inspector selection/pins -> tool mode -> multi-select -> deactivate.
+    if (settingsOpen) {
+      if (settingsEscape.current?.()) return;
+      setSettingsOpen(false);
+      return;
+    }
+    if (popup) {
+      closePopup();
+      return;
+    }
+    if (inspectorEscape.current?.()) return;
+    if (mode !== "annotate") {
+      selectMode("annotate");
+      return;
+    }
+    if (multi) {
+      setMulti(null);
+      return;
+    }
+    deactivate();
   };
 
   useShortcuts({
@@ -627,7 +709,7 @@ export function Annotate({
   usePicker({
     surface,
     frameWindows,
-    active: active && mode === "annotate",
+    active: active && mode === "annotate" && !settingsOpen,
     popupOpen: Boolean(popup),
     blockInteractions: settings.blockInteractions,
     multiPending: Boolean(multi && multi.elements.length > 0),
@@ -714,6 +796,7 @@ export function Annotate({
       return;
     }
     const tracked = positions.get(annotation.id) ?? undefined;
+    setSettingsOpen(false);
     setPopup({
       mode: "edit",
       route,
@@ -746,7 +829,7 @@ export function Annotate({
   const toggleDockSide = () =>
     updateSettings({ ...settings, dockSide: nextDockSide(settings.dockSide) });
 
-  const settingsCenterY = clampNotchCenterY(notchCenterY, 440, viewport.height, 16);
+  const settingsCenterY = clampNotchCenterY(notchCenterY, settingsHeight, viewport.height, 16);
   const rootInsets = {
     "--annotate-inset-right": active && dockSide === "right" ? "64px" : "16px",
     "--annotate-inset-left": active && dockSide === "left" ? "64px" : "16px",
@@ -754,6 +837,7 @@ export function Annotate({
 
   const settingsPanel = active && settingsOpen && (
     <div
+      ref={setSettingsPopoverEl}
       data-annotate-settings-popover=""
       style={{ top: settingsCenterY, transform: "translateY(-50%)" }}
       className={cn(
@@ -771,6 +855,8 @@ export function Annotate({
         webhookUrlProp={props.webhookUrl}
         onChange={updateSettings}
         onThemeChange={updateTheme}
+        onClose={() => setSettingsOpen(false)}
+        setEscape={setSettingsEscape}
       />
     </div>
   );
@@ -866,6 +952,7 @@ export function Annotate({
           sourceFile={popup.mode === "edit" ? popup.annotation.sourceFile : popup.capture.sourceFile}
           onOpenSource={props.onOpenSource}
           point={popup.point}
+          dockSide={dockSide}
           closing={popup.closing}
           shake={popup.shake}
           onCancel={closePopup}
@@ -910,7 +997,12 @@ export function Annotate({
             onToggleFreeze={() => setFreeze(!frozen)}
             onCopy={() => void copy()}
             onClear={clearEverything}
-            onToggleSettings={() => setSettingsOpen((open) => !open)}
+            onToggleSettings={() =>
+              setSettingsOpen((open) => {
+                if (!open) setPopup(null);
+                return !open;
+              })
+            }
             onExit={deactivate}
             dragHandlers={dragHandlers}
             theme={theme}

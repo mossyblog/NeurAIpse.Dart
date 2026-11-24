@@ -47,9 +47,10 @@ export function useDragPosition(onClick: () => void, options: UseDragPositionOpt
     const saved = loadPosition();
     return saved ? saved.y : Math.round(window.innerHeight / 2);
   });
-  const [notchHeight, setNotchHeight] = useState<number>(() =>
-    expanded ? EXPANDED_NOTCH_ESTIMATE : LAUNCHER_HEIGHT,
-  );
+  const [measured, setMeasured] = useState<{ expanded: boolean; height: number }>(() => ({
+    expanded,
+    height: expanded ? EXPANDED_NOTCH_ESTIMATE : LAUNCHER_HEIGHT,
+  }));
   const [liveDrag, setLiveDrag] = useState<{ centerY: number; side: DockSide } | null>(null);
   const [dockEl, setDockEl] = useState<HTMLElement | null>(null);
   const drag = useRef<{ start: Point; originY: number; side: DockSide; moved: boolean } | null>(null);
@@ -62,13 +63,23 @@ export function useDragPosition(onClick: () => void, options: UseDragPositionOpt
       if (dockEl.getAttribute("data-dock-hovered") === "true") return;
       const rect = entries[0]?.contentRect ?? dockEl.getBoundingClientRect();
       if (rect.height > 0) {
-        setNotchHeight((prev) => (Math.abs(prev - rect.height) < 1 ? prev : rect.height));
+        setMeasured((prev) =>
+          prev.expanded === expanded && Math.abs(prev.height - rect.height) < 1
+            ? prev
+            : { expanded, height: rect.height },
+        );
       }
     });
     observer.observe(dockEl);
     return () => observer.disconnect();
   }, [dockEl, expanded]);
 
+  const notchHeight =
+    measured.expanded === expanded
+      ? measured.height
+      : expanded
+        ? EXPANDED_NOTCH_ESTIMATE
+        : LAUNCHER_HEIGHT;
   const effectiveHeight =
     notchHeight > 0 ? notchHeight : expanded ? EXPANDED_NOTCH_ESTIMATE : LAUNCHER_HEIGHT;
   const effectiveSide: DockSide = liveDrag ? liveDrag.side : side;

@@ -182,7 +182,7 @@ test("standalone Annotate mounts self-contained Shadow DOM UI, opens toolbar, an
     "Annotate",
     "Spacing inspector",
     "Type inspector",
-    "Colour inspector",
+    "Color inspector",
     "Layout",
     "Rearrange",
   ]) {
@@ -352,18 +352,70 @@ test("standalone Annotate mounts self-contained Shadow DOM UI, opens toolbar, an
   });
   assert.equal(notch.getAttribute("data-gooey-frame"), "false");
 
+  // Modifying a feel slider switches the Preset label to "Custom".
+  assert.ok(presetBtn.textContent.includes("Custom"), `expected Preset to display "Custom", got "${presetBtn.textContent}"`);
+
+  // Escape dismisses innermost-first: open dropdown -> Customize sheet -> Settings panel -> mode.
   await act(async () => {
-    resetBtn.click();
+    presetBtn.click();
   });
-  assert.equal(particleSlider.getAttribute("aria-valuenow"), "15");
+  assert.ok(sheet.querySelector('[role="listbox"]'), "preset dropdown opens");
+  await act(async () => {
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  assert.equal(sheet.querySelector('[role="listbox"]'), null, "first Escape closes open scrubber dropdown");
+  assert.ok(shadow.querySelector("[data-annotate-notch-sheet]"), "Customize sheet remains open after closing dropdown");
+
+  await act(async () => {
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  assert.equal(shadow.querySelector("[data-annotate-notch-sheet]"), null, "second Escape closes Customize sheet back to MainView");
+  assert.ok(shadow.querySelector("[data-annotate-settings-popover]"), "Settings panel remains open after closing Customize sheet");
+
+  await act(async () => {
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  assert.equal(shadow.querySelector("[data-annotate-settings-popover]"), null, "third Escape closes Settings panel");
+  assert.equal(gooeyNav.getAttribute("data-gooey-active"), "spacing", "active mode preserved while dismissing Settings");
+
+  // Re-open Settings -> Customize to verify Reset and the real Close settings X button.
+  await act(async () => {
+    settingsBtn.click();
+  });
+  await act(async () => {
+    shadow.querySelector("[data-open-notch-sheet]").click();
+  });
+  const sheet2 = shadow.querySelector("[data-annotate-notch-sheet]");
+  const resetBtn2 = sheet2.querySelector("[data-gooey-reset]");
+  const particleSlider2 = sheet2.querySelector('[data-gooey-control="particleCount"]');
+  await act(async () => {
+    resetBtn2.click();
+  });
+  assert.equal(particleSlider2.getAttribute("aria-valuenow"), "15");
   assert.equal(notch.getAttribute("data-gooey-frame"), "true");
 
-  const closeSheetBtn = sheet.querySelector('button[aria-label="Close notch settings"]');
+  const closeSheetBtn = sheet2.querySelector('button[aria-label="Close settings"]');
   assert.ok(closeSheetBtn);
   await act(async () => {
     closeSheetBtn.click();
   });
   assert.equal(shadow.querySelector("[data-annotate-notch-sheet]"), null, "sheet closes cleanly");
+  assert.equal(shadow.querySelector("[data-annotate-settings-popover]"), null, "X closes entire Settings panel");
+
+  // NotchDockButton avoids duplicate native title tooltips, Exit advertises Esc shortcut.
+  assert.equal(exitBtn.getAttribute("title"), null, "dock buttons omit native title to avoid double tooltips");
+  assert.equal(exitBtn.getAttribute("aria-keyshortcuts"), "Esc", "Exit button advertises Esc shortcut");
+
+  // Outside click dismisses Settings without triggering page picking.
+  await act(async () => {
+    settingsBtn.click();
+  });
+  assert.ok(shadow.querySelector("[data-annotate-settings-popover]"));
+  await act(async () => {
+    dom.window.document.body.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    dom.window.document.body.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0 }));
+  });
+  assert.equal(shadow.querySelector("[data-annotate-settings-popover]"), null, "outside click dismisses Settings");
 
   // Exiting returns to the collapsed Apple side notch launcher on the chosen side.
   await act(async () => {

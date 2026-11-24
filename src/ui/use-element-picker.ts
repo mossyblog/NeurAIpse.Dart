@@ -31,7 +31,10 @@ export function useElementPicker(options: {
   };
 
   const onMove = useEffectEvent((event: PointerEvent) => {
-    if (isFromSurface(event, surface)) return;
+    if (isFromSurface(event, surface)) {
+      setHover(null);
+      return;
+    }
     const next = at(event.clientX, event.clientY);
     setHover((current) => (current === next ? current : next));
   });

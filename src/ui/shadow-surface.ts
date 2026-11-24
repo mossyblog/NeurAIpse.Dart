@@ -118,13 +118,13 @@ const OWN_CSS = `
   --annotate-scrubber-track: rgba(255, 255, 255, 0.04);
   --annotate-scrubber-fill: rgba(255, 255, 255, 0.06);
   --annotate-scrubber-thumb: rgba(255, 255, 255, 0.9);
-  --annotate-scrubber-tick: #2f293a;
+  --annotate-scrubber-tick: #3f3f46;
   --annotate-scrubber-ghost: rgba(255, 255, 255, 0.07);
   --annotate-scrubber-ghost-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  --annotate-scrubber-switch-track: #37313f;
+  --annotate-scrubber-switch-track: #3f3f46;
   --annotate-scrubber-switch-checked: #d4d4d8;
   --annotate-scrubber-switch-knob: #a1a1aa;
-  --annotate-scrubber-switch-knob-checked: #27222e;
+  --annotate-scrubber-switch-knob-checked: #18181b;
 }
 .annotate-root :is([data-theme="light"], [data-theme="dark"]) {
   --annotate-destructive-soft: color-mix(in srgb, var(--annotate-destructive) 12%, transparent);
@@ -190,7 +190,12 @@ const OWN_CSS = `
 }
 .annotate-scrubber-track {
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   height: 40px;
+  padding: 0 12px;
   border-radius: 10px;
   background: var(--annotate-scrubber-track);
   border: 1px solid transparent;
@@ -200,6 +205,9 @@ const OWN_CSS = `
   outline: none;
   outline-offset: 2px;
   transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), background-color 150ms ease;
+}
+.annotate-scrubber-track:hover:not([data-disabled="true"]) {
+  background: color-mix(in srgb, var(--annotate-scrubber-track) 70%, var(--foreground) 6%);
 }
 .annotate-scrubber-track:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--ring) 55%, transparent);
@@ -251,10 +259,10 @@ const OWN_CSS = `
   transform: scaleX(1) scaleY(1);
 }
 .annotate-scrubber-label {
-  position: absolute;
-  top: 50%;
-  left: 12px;
-  transform: translateY(-50%);
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted-foreground);
   font-size: 13px;
@@ -264,10 +272,8 @@ const OWN_CSS = `
   z-index: 4;
 }
 .annotate-scrubber-value {
-  position: absolute;
-  top: 50%;
-  right: 12px;
-  transform: translateY(-50%);
+  position: relative;
+  flex-shrink: 0;
   color: var(--foreground);
   font-variant-numeric: tabular-nums;
   font-size: 13px;
@@ -277,22 +283,17 @@ const OWN_CSS = `
 }
 .annotate-scrubber-track--switch,
 .annotate-scrubber-track--select {
-  display: flex;
-  align-items: center;
   width: 100%;
   text-align: left;
   font: inherit;
-  padding: 0;
 }
 .annotate-scrubber-track--switch:active:not([data-disabled="true"]),
 .annotate-scrubber-track--select:active:not([data-disabled="true"]) {
   transform: scale(0.985);
 }
 .annotate-scrubber-switch-toggle {
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
+  position: relative;
+  flex-shrink: 0;
   width: 36px;
   height: 20px;
   border-radius: 999px;
@@ -320,10 +321,8 @@ const OWN_CSS = `
   background: var(--annotate-scrubber-switch-knob-checked);
 }
 .annotate-scrubber-select-right {
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
+  position: relative;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -331,8 +330,6 @@ const OWN_CSS = `
   pointer-events: none;
 }
 .annotate-scrubber-track--select .annotate-scrubber-value {
-  position: static;
-  transform: none;
   font-weight: 400;
 }
 .annotate-scrubber-caret {
@@ -360,6 +357,11 @@ const OWN_CSS = `
   transform-origin: top center;
   animation: annotate-enter 140ms cubic-bezier(0.22, 1, 0.36, 1);
 }
+.annotate-scrubber-dropdown--up {
+  top: auto;
+  bottom: calc(100% + 4px);
+  transform-origin: bottom center;
+}
 .annotate-scrubber-dropdown-item {
   display: block;
   width: 100%;
@@ -373,7 +375,8 @@ const OWN_CSS = `
   cursor: pointer;
   transition: background-color 120ms ease, color 120ms ease;
 }
-.annotate-scrubber-dropdown-item:hover {
+.annotate-scrubber-dropdown-item:hover,
+.annotate-scrubber-dropdown-item--highlighted {
   background: var(--accent);
   color: var(--foreground);
 }
@@ -383,13 +386,12 @@ const OWN_CSS = `
   background: var(--annotate-scrubber-ghost);
 }
 .annotate-scrubber-track--color {
+  padding: 0 10px 0 12px;
   cursor: default;
 }
 .annotate-scrubber-color-controls {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
+  position: relative;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 6px;

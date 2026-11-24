@@ -173,20 +173,49 @@ export function ScrubberSelect<T extends string>({
   title,
   options,
   value,
+  displayLabel,
   disabled = false,
   controlKey,
+  onRegisterEscape,
   onChange,
 }: {
   title: string;
   options: readonly { value: T; label: string }[];
-  value: T;
+  value: T | string;
+  displayLabel?: string;
   disabled?: boolean;
   controlKey: string;
+  onRegisterEscape?: (handler: (() => boolean) | null) => void;
   onChange: (value: T) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [openUp, setOpenUp] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const activeLabel = options.find((opt) => opt.value === value)?.label ?? value;
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const activeLabel = displayLabel ?? options.find((opt) => opt.value === value)?.label ?? value;
+
+  const toggleOpen = (next: boolean) => {
+    if (next && wrapRef.current) {
+      const rect = wrapRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      setOpenUp(spaceBelow < 220 && rect.top > spaceBelow);
+      const selectedIdx = options.findIndex((opt) => opt.value === value);
+      setActiveIndex(selectedIdx >= 0 ? selectedIdx : 0);
+    }
+    setOpen(next);
+  };
+
+  useEffect(() => {
+    if (!open || !onRegisterEscape) return;
+    const handler = () => {
+      setOpen(false);
+      triggerRef.current?.focus({ preventScroll: true });
+      return true;
+    };
+    onRegisterEscape(handler);
+    return () => onRegisterEscape(null);
+  }, [open, onRegisterEscape]);
 
   useEffect(() => {
     if (!open) return;
@@ -198,9 +227,12 @@ export function ScrubberSelect<T extends string>({
       }
     };
     const onKeyDown = (event: Event) => {
-      if ((event as globalThis.KeyboardEvent).key === "Escape") {
-        (event as globalThis.KeyboardEvent).stopPropagation();
+      const ke = event as globalThis.KeyboardEvent;
+      if (ke.key === "Escape" && !ke.defaultPrevented) {
+        ke.preventDefault();
+        ke.stopPropagation();
         setOpen(false);
+        triggerRef.current?.focus({ preventScroll: true });
       }
     };
     target.addEventListener("pointerdown", onPointerDown, true);
@@ -211,9 +243,40 @@ export function ScrubberSelect<T extends string>({
     };
   }, [open]);
 
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (disabled || options.length === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (!open) {
+        toggleOpen(true);
+      } else {
+        setActiveIndex((idx) => (idx + 1) % options.length);
+      }
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open) {
+        toggleOpen(true);
+      } else {
+        setActiveIndex((idx) => (idx <= 0 ? options.length - 1 : idx - 1));
+      }
+    } else if (event.key === "Home" && open) {
+      event.preventDefault();
+      setActiveIndex(0);
+    } else if (event.key === "End" && open) {
+      event.preventDefault();
+      setActiveIndex(options.length - 1);
+    } else if ((event.key === "Enter" || event.key === " ") && open && activeIndex >= 0 && activeIndex < options.length) {
+      event.preventDefault();
+      onChange(options[activeIndex].value);
+      setOpen(false);
+      triggerRef.current?.focus({ preventScroll: true });
+    }
+  };
+
   return (
-    <div ref={wrapRef} className="annotate-scrubber">
+    <div ref={wrapRef} className="annotate-scrubber" onKeyDown={handleKeyDown}>
       <button
+        ref={triggerRef}
         type="button"
         className="annotate-scrubber-track annotate-scrubber-track--select"
         aria-label={title}
@@ -223,7 +286,7 @@ export function ScrubberSelect<T extends string>({
         data-disabled={disabled}
         data-gooey-control={controlKey}
         tabIndex={disabled ? -1 : 0}
-        onClick={() => !disabled && setOpen((o) => !o)}
+        onClick={() => !disabled && toggleOpen(!open)}
       >
         <span className="annotate-scrubber-label">{title}</span>
         <span className="annotate-scrubber-select-right">
@@ -248,20 +311,27 @@ export function ScrubberSelect<T extends string>({
       </button>
 
       {open && (
-        <div className="annotate-scrubber-dropdown" role="listbox" aria-label={title}>
-          {options.map((opt) => (
+        <div
+          className={`annotate-scrubber-dropdown${openUp ? " annotate-scrubber-dropdown--up" : ""}`}
+          role="listbox"
+          aria-label={title}
+        >
+          {options.map((opt, idx) => (
             <button
               key={opt.value}
               type="button"
               role="option"
               aria-selected={opt.value === value}
               data-option-value={opt.value}
+              data-highlighted={idx === activeIndex ? "true" : undefined}
               className={`annotate-scrubber-dropdown-item${
                 opt.value === value ? " annotate-scrubber-dropdown-item--active" : ""
-              }`}
+              }${idx === activeIndex ? " annotate-scrubber-dropdown-item--highlighted" : ""}`}
+              onMouseEnter={() => setActiveIndex(idx)}
               onClick={() => {
                 onChange(opt.value);
                 setOpen(false);
+                triggerRef.current?.focus({ preventScroll: true });
               }}
             >
               {opt.label}
@@ -278,18 +348,43 @@ export function ScrubberColorPicker({
   color,
   disabled = false,
   controlKey,
+  onRegisterEscape,
   onChange,
 }: {
   title: string;
   color: string;
   disabled?: boolean;
   controlKey: string;
+  onRegisterEscape?: (handler: (() => boolean) | null) => void;
   onChange: (hex: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [openUp, setOpenUp] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const swatchBtnRef = useRef<HTMLButtonElement>(null);
   const displayHex = draft ?? color.toLowerCase();
+  const normalizedColor = color.trim().toLowerCase();
+
+  const toggleOpen = (next: boolean) => {
+    if (next && wrapRef.current) {
+      const rect = wrapRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      setOpenUp(spaceBelow < 220 && rect.top > spaceBelow);
+    }
+    setOpen(next);
+  };
+
+  useEffect(() => {
+    if (!open || !onRegisterEscape) return;
+    const handler = () => {
+      setOpen(false);
+      swatchBtnRef.current?.focus({ preventScroll: true });
+      return true;
+    };
+    onRegisterEscape(handler);
+    return () => onRegisterEscape(null);
+  }, [open, onRegisterEscape]);
 
   useEffect(() => {
     if (!open) return;
@@ -301,9 +396,12 @@ export function ScrubberColorPicker({
       }
     };
     const onKeyDown = (event: Event) => {
-      if ((event as globalThis.KeyboardEvent).key === "Escape") {
-        (event as globalThis.KeyboardEvent).stopPropagation();
+      const ke = event as globalThis.KeyboardEvent;
+      if (ke.key === "Escape" && !ke.defaultPrevented) {
+        ke.preventDefault();
+        ke.stopPropagation();
         setOpen(false);
+        swatchBtnRef.current?.focus({ preventScroll: true });
       }
     };
     target.addEventListener("pointerdown", onPointerDown, true);
@@ -333,13 +431,14 @@ export function ScrubberColorPicker({
         <span className="annotate-scrubber-label">{title}</span>
         <div className="annotate-scrubber-color-controls">
           <button
+            ref={swatchBtnRef}
             type="button"
             className="annotate-scrubber-color-swatch"
             style={{ backgroundColor: color }}
             aria-label={`${title} swatch`}
             aria-expanded={open}
             disabled={disabled}
-            onClick={() => !disabled && setOpen((o) => !o)}
+            onClick={() => !disabled && toggleOpen(!open)}
           />
           <input
             type="text"
@@ -372,22 +471,33 @@ export function ScrubberColorPicker({
       </div>
 
       {open && (
-        <div className="annotate-scrubber-dropdown" role="dialog" aria-label={`${title} swatches`}>
+        <div
+          className={`annotate-scrubber-dropdown${openUp ? " annotate-scrubber-dropdown--up" : ""}`}
+          role="dialog"
+          aria-label={`${title} swatches`}
+        >
           <div className="grid grid-cols-5 gap-1.5 p-1">
-            {SWATCHES.map((swatch) => (
-              <button
-                key={swatch}
-                type="button"
-                aria-label={swatch}
-                className="h-6 w-full cursor-pointer rounded-md border border-border transition-transform hover:scale-105"
-                style={{ backgroundColor: swatch }}
-                onClick={() => {
-                  onChange(swatch);
-                  setDraft(null);
-                  setOpen(false);
-                }}
-              />
-            ))}
+            {SWATCHES.map((swatch) => {
+              const active = swatch.toLowerCase() === normalizedColor;
+              return (
+                <button
+                  key={swatch}
+                  type="button"
+                  aria-label={swatch}
+                  aria-pressed={active}
+                  className={`h-6 w-full cursor-pointer rounded-md border border-border outline-none transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-1 focus-visible:ring-offset-popover${
+                    active ? " ring-2 ring-foreground ring-offset-1 ring-offset-popover" : ""
+                  }`}
+                  style={{ backgroundColor: swatch }}
+                  onClick={() => {
+                    onChange(swatch);
+                    setDraft(null);
+                    setOpen(false);
+                    swatchBtnRef.current?.focus({ preventScroll: true });
+                  }}
+                />
+              );
+            })}
           </div>
           <label className="mt-1 flex cursor-pointer items-center justify-between gap-2 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
             <span>Custom color</span>

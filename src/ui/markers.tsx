@@ -39,7 +39,7 @@ function Marker({
       aria-label={`Annotation ${index + 1}: ${annotation.element}`}
       title={annotation.comment || annotation.element}
       onClick={() => onSelect(annotation, index)}
-      className="pointer-events-auto flex size-6 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full font-mono text-[11px] leading-none font-semibold text-white tabular-nums shadow-md ring-2 ring-background transition-transform duration-150 outline-none select-none hover:z-10 hover:scale-110 focus-visible:z-10 focus-visible:ring-ring data-[active=true]:z-10 data-[active=true]:scale-110 motion-reduce:transition-none"
+      className="pointer-events-auto flex size-6 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full font-mono text-[11px] leading-none font-semibold text-white tabular-nums shadow-md ring-2 ring-background transition-transform duration-150 outline-none select-none hover:z-10 hover:scale-110 focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[active=true]:z-10 data-[active=true]:scale-110 motion-reduce:transition-none"
       data-active={active}
       data-annotate-marker={index + 1}
       data-marker-position={annotation.isFixed ? "fixed" : "absolute"}

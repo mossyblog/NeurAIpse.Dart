@@ -18,7 +18,7 @@ export function Switch({ checked, onCheckedChange, ...rest }: SwitchProps) {
       data-state={checked ? "checked" : "unchecked"}
       onCheckedChange={onCheckedChange}
       className={cn(
-        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-150 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none",
+        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring/50 motion-reduce:transition-none",
         checked
           ? "bg-primary"
           : "bg-foreground/15 hover:bg-foreground/20 dark:bg-white/15 dark:hover:bg-white/20",
