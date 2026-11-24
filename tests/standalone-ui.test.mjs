@@ -178,16 +178,10 @@ test("standalone Annotate mounts self-contained Shadow DOM UI, opens toolbar, an
 
   const toolbar = shadow.querySelector('[aria-label="Feedback controls"]');
   assert.ok(toolbar, "toolbar opens after clicking launcher");
-  for (const label of [
-    "Annotate",
-    "Spacing inspector",
-    "Type inspector",
-    "Color inspector",
-    "Layout",
-    "Rearrange",
-  ]) {
+  for (const label of ["Select", "Design", "Measure"]) {
     assert.ok(toolbar.querySelector(`button[aria-label="${label}"]`), `toolbar includes mode button "${label}"`);
   }
+  assert.equal(toolbar.querySelector('button[aria-label="Type inspector"]'), null, "fragmented legacy mode buttons removed from notch");
 
   const settingsButton = toolbar.querySelector('button[aria-label="Settings"]');
   assert.ok(settingsButton, "settings button exists on toolbar");
@@ -234,19 +228,20 @@ test("standalone Annotate mounts self-contained Shadow DOM UI, opens toolbar, an
   assert.equal(notch.getAttribute("data-dock-side"), "right");
 
   // macOS Dock hover magnification: icons start small and enlarge around the hovered icon.
-  const annotateBtn = toolbar.querySelector('button[aria-label="Annotate"]');
-  const spacingBtn = toolbar.querySelector('button[aria-label="Spacing inspector"]');
+  const selectBtn = toolbar.querySelector('button[aria-label="Select"]');
+  const designBtn = toolbar.querySelector('button[aria-label="Design"]');
+  const measureBtn = toolbar.querySelector('button[aria-label="Measure"]');
   const exitBtn = toolbar.querySelector('button[aria-label="Exit"]');
-  assert.ok(annotateBtn && spacingBtn && exitBtn);
-  assert.equal(annotateBtn.getAttribute("data-dock-factor"), "0.00");
-  assert.equal(spacingBtn.getAttribute("data-dock-factor"), "0.00");
+  assert.ok(selectBtn && designBtn && measureBtn && exitBtn);
+  assert.equal(selectBtn.getAttribute("data-dock-factor"), "0.00");
+  assert.equal(designBtn.getAttribute("data-dock-factor"), "0.00");
 
   await act(async () => {
-    spacingBtn.parentElement.dispatchEvent(new dom.window.MouseEvent("pointerover", { bubbles: true }));
+    designBtn.parentElement.dispatchEvent(new dom.window.MouseEvent("pointerover", { bubbles: true }));
   });
 
-  const hoveredFactor = Number(spacingBtn.getAttribute("data-dock-factor"));
-  const neighborFactor = Number(annotateBtn.getAttribute("data-dock-factor"));
+  const hoveredFactor = Number(designBtn.getAttribute("data-dock-factor"));
+  const neighborFactor = Number(selectBtn.getAttribute("data-dock-factor"));
   const distantFactor = Number(exitBtn.getAttribute("data-dock-factor"));
   assert.equal(hoveredFactor, 1, "hovered icon magnifies to peak factor");
   assert.ok(neighborFactor > 0 && neighborFactor < 1, `neighbor magnifies partially (got ${neighborFactor})`);
@@ -256,8 +251,8 @@ test("standalone Annotate mounts self-contained Shadow DOM UI, opens toolbar, an
     return match ? Number(match[1]) : 0;
   };
   assert.ok(
-    parseScale(spacingBtn) > parseScale(annotateBtn) &&
-      parseScale(annotateBtn) > parseScale(exitBtn),
+    parseScale(designBtn) > parseScale(selectBtn) &&
+      parseScale(selectBtn) > parseScale(exitBtn),
     "GPU transform scales follow the dock magnification wave",
   );
   assert.ok(notch.querySelector("[data-dock-tooltip]"), "dock tooltip pill renders next to hovered icon");
@@ -265,7 +260,7 @@ test("standalone Annotate mounts self-contained Shadow DOM UI, opens toolbar, an
   await act(async () => {
     notch.dispatchEvent(new dom.window.MouseEvent("pointerout", { bubbles: true, relatedTarget: dom.window.document.body }));
   });
-  assert.equal(spacingBtn.getAttribute("data-dock-factor"), "0.00");
+  assert.equal(designBtn.getAttribute("data-dock-factor"), "0.00");
   assert.equal(notch.querySelector("[data-dock-tooltip]"), null, "tooltip hides when leaving notch");
 
   // Dragging the grip handle across the viewport midpoint switches dock side and persists it.
@@ -278,16 +273,37 @@ test("standalone Annotate mounts self-contained Shadow DOM UI, opens toolbar, an
   });
   assert.equal(notch.getAttribute("data-dock-side"), "left", "dragging across viewport snaps notch to left side");
 
-  // Switching modes updates the ported WebGL2 GooeyNav canvas & active mode indicator.
+  // Switching modes updates the ported WebGL2 GooeyNav canvas & active mode indicator,
+  // and shows the Design / Measure contextual sub-mode switchers in the bottom tray.
   const gooeyNav = notch.querySelector("[data-gooey-nav]");
   const gooeyCanvas = notch.querySelector("[data-gooey-canvas]");
   assert.ok(gooeyNav && gooeyCanvas, "mode group renders WebGL2 GooeyNav canvas");
   assert.equal(gooeyNav.getAttribute("data-gooey-enabled"), "true");
   assert.equal(gooeyNav.getAttribute("data-gooey-active"), "annotate");
+
+  // Pressing D enters Design mode and exposes Inspect | Move | Wireframe in the tray.
   await act(async () => {
-    spacingBtn.click();
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "d", bubbles: true }));
   });
-  assert.equal(gooeyNav.getAttribute("data-gooey-active"), "spacing");
+  assert.equal(gooeyNav.getAttribute("data-gooey-active"), "design");
+  for (const sub of ["design", "rearrange", "layout"]) {
+    assert.ok(shadow.querySelector(`[data-design-sub-mode="${sub}"]`), `Design tray exposes "${sub}" sub-mode`);
+  }
+
+  // Clicking Measure enters Measure mode and exposes Vertical | Horizontal | Box | Lines.
+  await act(async () => {
+    measureBtn.click();
+  });
+  assert.equal(gooeyNav.getAttribute("data-gooey-active"), "measure");
+  for (const sub of ["measure-v", "measure-h", "box", "lines"]) {
+    assert.ok(shadow.querySelector(`[data-measure-sub-mode="${sub}"]`), `Measure tray exposes "${sub}" sub-mode`);
+  }
+  // Pressing 2 switches to Horizontal ruler while keeping Measure highlighted on the notch.
+  await act(async () => {
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "2", bubbles: true }));
+  });
+  assert.equal(gooeyNav.getAttribute("data-gooey-active"), "measure");
+  assert.equal(shadow.querySelector('[data-measure-sub-mode="measure-h"]').getAttribute("aria-pressed"), "true");
 
   // Opening Settings -> Gooey selection opens the React Bits Customize sheet with all 12 controls.
   const settingsBtn = toolbar.querySelector('button[aria-label="Settings"]');
@@ -376,7 +392,7 @@ test("standalone Annotate mounts self-contained Shadow DOM UI, opens toolbar, an
     dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   });
   assert.equal(shadow.querySelector("[data-annotate-settings-popover]"), null, "third Escape closes Settings panel");
-  assert.equal(gooeyNav.getAttribute("data-gooey-active"), "spacing", "active mode preserved while dismissing Settings");
+  assert.equal(gooeyNav.getAttribute("data-gooey-active"), "measure", "active mode preserved while dismissing Settings");
 
   // Re-open Settings -> Customize to verify Reset and the real Close settings X button.
   await act(async () => {

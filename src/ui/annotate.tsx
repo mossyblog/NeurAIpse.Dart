@@ -101,7 +101,7 @@ export type AnnotateProps = {
 };
 
 /** Toolbar tool modes (inspector spec 2): mutually exclusive. */
-export type ToolMode = "annotate" | "spacing" | "type" | "color" | "layout" | "rearrange" | "measure-v" | "measure-h";
+export type ToolMode = "annotate" | "design" | "spacing" | "type" | "color" | "layout" | "rearrange" | "measure-v" | "measure-h";
 
 type PopupState = {
   route: string;
@@ -665,9 +665,15 @@ export function Annotate({
     else if (action === "copy") void copy();
     else if (action === "clear") clearEverything();
     else if (action === "send") void send();
-    else if (action === "spacing" || action === "type" || action === "color") selectMode(mode === action ? "annotate" : action);
-    else if (action === "subMode") selectSubMode(nextSubMode(subMode));
-    else if (action === "layout") selectMode(mode === "layout" ? "annotate" : "layout");
+    else if (action === "design") selectMode(mode === "design" ? "annotate" : "design");
+    else if (action === "spacing") {
+      const inMeasure = mode === "measure-v" || mode === "measure-h" || mode === "spacing";
+      selectMode(inMeasure ? "annotate" : "measure-v");
+    } else if (action === "type" || action === "color") selectMode(mode === action ? "annotate" : action);
+    else if (action === "subMode") {
+      if (mode !== "spacing") selectMode("spacing");
+      else selectSubMode(nextSubMode(subMode));
+    } else if (action === "layout") selectMode(mode === "layout" ? "annotate" : "layout");
     else if (action === "rearrange") selectMode(mode === "rearrange" ? "annotate" : "rearrange");
     else if (action === "measureV") selectMode(mode === "measure-v" ? "annotate" : "measure-v");
     else if (action === "measureH") selectMode(mode === "measure-h" ? "annotate" : "measure-h");
@@ -705,7 +711,7 @@ export function Annotate({
     rearrangeCount,
     canSend: hasSendTarget(sendTargets),
     sendState,
-    spacingActive: active && mode === "spacing",
+    spacingActive: active && (mode === "spacing" || mode === "measure-v" || mode === "measure-h"),
     frameWindows,
     onToggle: toggle,
     onEscape,
@@ -893,6 +899,8 @@ export function Annotate({
             onSelect={onMarkerSelect}
           />
         )}
+        {/* TODO(wave-2): swap in <DesignMode /> */}
+        {active && mode === "design" && <SpacingInspector key={subMode} ctx={inspectorCtx} />}
         {active && mode === "spacing" && <SpacingInspector key={subMode} ctx={inspectorCtx} />}
         {active && mode === "type" && <TypeInspector ctx={inspectorCtx} />}
         {active && mode === "color" && <ColorInspector ctx={inspectorCtx} />}

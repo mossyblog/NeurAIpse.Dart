@@ -237,11 +237,11 @@ test("style previews persist across mode switches and overlay hide/reopen, and r
   assert.match(styleEl().textContent, /padding-top:\s*24px !important/);
   assert.ok(card.getAttribute(GROUP_ATTRIBUTE), "target element has data-annotate-group attribute");
 
-  // Open overlay -> switch across Spacing, Color, Type, and Annotate modes.
+  // Open overlay -> switch across Design, Measure, and Select modes.
   await act(async () => {
     shadow.querySelector('button[aria-label="Start feedback mode"]').click();
   });
-  for (const label of ["Spacing inspector", "Color inspector", "Type inspector", "Annotate"]) {
+  for (const label of ["Design", "Measure", "Select"]) {
     await act(async () => {
       shadow.querySelector(`button[aria-label="${label}"]`).click();
     });
@@ -289,11 +289,19 @@ test("rearrange previews persist across mode switches and overlay hide/reopen, a
   assert.match(rearrangeStyle().textContent, /width:\s*140px !important/);
   assert.ok(cta.getAttribute(REARRANGE_ID_ATTRIBUTE), "target element carries data-annotate-rearrange-id");
 
-  // Open overlay, enter Rearrange mode, then switch to Annotate and Spacing modes.
+  // Open overlay, enter Design -> Move (Rearrange) mode, then switch to Select and Measure modes.
   await act(async () => {
     shadow.querySelector('button[aria-label="Start feedback mode"]').click();
   });
-  for (const label of ["Rearrange", "Annotate", "Spacing inspector"]) {
+  await act(async () => {
+    shadow.querySelector('button[aria-label="Design"]').click();
+  });
+  await act(async () => {
+    shadow.querySelector('[data-design-sub-mode="rearrange"]').click();
+  });
+  assert.ok(rearrangeStyle(), "rearrange preview persists in Move mode");
+  assert.ok(cta.getAttribute(REARRANGE_ID_ATTRIBUTE), "rearrange attribute persists in Move mode");
+  for (const label of ["Select", "Measure"]) {
     await act(async () => {
       shadow.querySelector(`button[aria-label="${label}"]`).click();
     });
@@ -308,12 +316,15 @@ test("rearrange previews persist across mode switches and overlay hide/reopen, a
   assert.ok(rearrangeStyle(), "rearrange preview persists after exiting overlay");
   assert.ok(cta.getAttribute(REARRANGE_ID_ATTRIBUTE), "rearrange attribute persists after exiting overlay");
 
-  // Reopen overlay -> Rearrange mode -> Reset individual item reverts cleanly.
+  // Reopen overlay -> Design -> Move mode -> Reset individual item reverts cleanly.
   await act(async () => {
     shadow.querySelector('button[aria-label="Start feedback mode"]').click();
   });
   await act(async () => {
-    shadow.querySelector('button[aria-label="Rearrange"]').click();
+    shadow.querySelector('button[aria-label="Design"]').click();
+  });
+  await act(async () => {
+    shadow.querySelector('[data-design-sub-mode="rearrange"]').click();
   });
   const resetBtn = shadow.querySelector('button[aria-label^="Reset"]');
   assert.ok(resetBtn, "Reset button renders in RearrangePanel for persisted item");

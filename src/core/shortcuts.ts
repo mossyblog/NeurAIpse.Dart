@@ -1,4 +1,4 @@
-export type ShortcutAction = "freeze" | "layout" | "hide" | "copy" | "clear" | "send" | "spacing" | "type" | "color" | "subMode" | "rearrange" | "measureV" | "measureH";
+export type ShortcutAction = "freeze" | "layout" | "hide" | "copy" | "clear" | "send" | "design" | "spacing" | "type" | "color" | "subMode" | "rearrange" | "measureV" | "measureH";
 
 export type KeyInput = {
   key: string;
@@ -31,6 +31,8 @@ const KEYS: Record<string, ShortcutAction> = {
   c: "copy",
   x: "clear",
   s: "send",
+  // Unified design inspector mode.
+  d: "design",
   m: "spacing",
   t: "type",
   // C is Copy, so the colour inspector uses K.
@@ -70,6 +72,7 @@ export function resolveShortcut(event: KeyInput, state: ShortcutState): Shortcut
     case "hide":
     case "layout":
     case "rearrange":
+    case "design":
     case "spacing":
     case "type":
     case "color":
