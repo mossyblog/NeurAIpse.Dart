@@ -29,6 +29,8 @@ import { createRearrangePreview, REARRANGE_ID_ATTRIBUTE, type RearrangeTarget } 
 import { pickAreaTargets, unionRect } from "../core/select.ts";
 import { isEditableElement } from "../core/shortcuts.ts";
 import { deepElementFromPoint } from "../core/spacing-dom.ts";
+import { spacingTokens } from "../core/style-change.ts";
+import { readRootVars } from "../core/tokens-dom.ts";
 import type { Annotation, Point, Rect } from "../core/types.ts";
 import { RearrangeOverlay, type OverlayBox } from "./rearrange-overlay.tsx";
 import { RearrangePanel, type RearrangeRow } from "./rearrange-panel.tsx";
@@ -197,6 +199,14 @@ const viewRect = (el: Element): Rect => {
   const b = el.getBoundingClientRect();
   return { x: b.left, y: b.top, width: b.width, height: b.height };
 };
+
+function readGridSnapping(): { gridStep: number; gapSteps: number[] } {
+  const rootFontPx = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  const tokens = spacingTokens(readRootVars(document), rootFontPx);
+  const gapSteps = Array.from(new Set(tokens.map((t) => Math.round(t.px)).filter((px) => px > 0))).sort((a, b) => a - b);
+  const base = gapSteps.find((px) => px >= 4 && px <= 16);
+  return { gridStep: base ?? 8, gapSteps };
+}
 
 /** `.card-btn` from the first class, else `#id`, else the tag (sibling and parent labels). */
 function shortLabel(el: Element): string {
@@ -460,7 +470,12 @@ export function RearrangeMode({ ctx }: { ctx: RearrangeContext }) {
       let moved = translateRect(g.union, dx, dy);
       let guides: SnapGuide[] = [];
       if (!event.altKey) {
-        const snap = snapRect(moved, g.targets, { lines: { x: event.shiftKey && dx === 0 ? [] : ["start", "mid", "end"], y: event.shiftKey && dy === 0 ? [] : ["start", "mid", "end"] } });
+        const { gridStep, gapSteps } = readGridSnapping();
+        const snap = snapRect(moved, g.targets, {
+          lines: { x: event.shiftKey && dx === 0 ? [] : ["start", "mid", "end"], y: event.shiftKey && dy === 0 ? [] : ["start", "mid", "end"] },
+          gridStep,
+          gapSteps,
+        });
         dx += snap.dx;
         dy += snap.dy;
         moved = translateRect(g.union, dx, dy);
@@ -474,7 +489,8 @@ export function RearrangeMode({ ctx }: { ctx: RearrangeContext }) {
     let visual = resizeFromHandle(g.visual, g.handle, dx, dy, { keepAspect: event.shiftKey });
     let guides: SnapGuide[] = [];
     if (!event.altKey && !event.shiftKey) {
-      const snap = snapRect(visual, g.targets, { lines: resizeSnapLines(g.handle) });
+      const { gridStep, gapSteps } = readGridSnapping();
+      const snap = snapRect(visual, g.targets, { lines: resizeSnapLines(g.handle), gridStep, gapSteps });
       visual = applyResizeSnap(visual, g.handle, snap.dx, snap.dy);
       guides = snap.guides;
     }
@@ -636,13 +652,9 @@ export function RearrangeMode({ ctx }: { ctx: RearrangeContext }) {
   const boxFor = (el: Element, selected: boolean): OverlayBox => {
     const logical = view?.draft.get(el);
     const record = recordOf.get(el);
-    let rect = viewRect(el);
-    if (logical) {
-      // Drafted boxes follow the drag exactly (the preview lands a frame later).
-      const base = record?.rearrange ?? null;
-      const from = base ? base.currentRect : logical.original;
-      rect = { x: rect.x + (logical.rect.x - from.x), y: rect.y + (logical.rect.y - from.y), width: logical.rect.width, height: logical.rect.height };
-    }
+    // While dragging, logical.rect is already the exact target document rect (avoids double-applying
+    // the drag delta once the preview translate has flushed to the DOM).
+    const rect = logical ? toView(logical.rect) : viewRect(el);
     const original = record?.rearrange?.originalRect ?? logical?.original;
     const current = logical?.rect ?? record?.rearrange?.currentRect;
     const ghost = original && current && !sameRect(original, current)

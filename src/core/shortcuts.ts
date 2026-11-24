@@ -1,4 +1,4 @@
-export type ShortcutAction = "freeze" | "layout" | "hide" | "copy" | "clear" | "send" | "spacing" | "type" | "color" | "subMode" | "rearrange";
+export type ShortcutAction = "freeze" | "layout" | "hide" | "copy" | "clear" | "send" | "spacing" | "type" | "color" | "subMode" | "rearrange" | "measureV" | "measureH";
 
 export type KeyInput = {
   key: string;
@@ -39,6 +39,9 @@ const KEYS: Record<string, ShortcutAction> = {
   v: "subMode",
   // Rearrange mode (parity spec 10.2): free of P L H C X S M T K V.
   r: "rearrange",
+  // Interactive measurement rulers: 1 = vertical, 2 = horizontal.
+  "1": "measureV",
+  "2": "measureH",
 };
 
 /** Cmd/Ctrl+Shift+F toggles the toolbar unless shortcuts are disabled. */
@@ -64,16 +67,17 @@ export function resolveShortcut(event: KeyInput, state: ShortcutState): Shortcut
     hasAnnotations || hasStyle || (state.placementCount ?? 0) > 0 || (state.rearrangeCount ?? 0) > 0;
   switch (action) {
     case "freeze":
+    case "hide":
     case "layout":
     case "rearrange":
     case "spacing":
     case "type":
     case "color":
+    case "measureV":
+    case "measureH":
       return action;
     case "subMode":
       return state.spacingActive ? action : null;
-    case "hide":
-      return hasAnnotations ? action : null;
     case "copy":
     case "clear":
       return hasAny ? action : null;

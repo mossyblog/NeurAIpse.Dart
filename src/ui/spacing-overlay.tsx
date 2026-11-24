@@ -96,48 +96,30 @@ function outward(p: PillPlacement, steps: number): PillPlacement {
 const summaryText = (text: string) => text.replace(/^(-?[pm])[trblxyse]-/, "$1-");
 
 /**
- * Pill layout for one padding / margin ring (spec 14.2): each pill starts on its band's
- * centre; a top/bottom band thinner than the pill moves its pill outward. When pills
- * still collide, four equal sides collapse to one summary pill (`p-4 · 16`); otherwise
- * pills that overhang their band move outward, and any still colliding stack further
- * out in 8px steps until clear. Every
- * emphasised side keeps a pill, so a selected side's value is never hidden.
+ * Pill layout for one padding / margin ring: pills ALWAYS sit cleanly outside their
+ * band's outer edge (`outward(p, 1)`) so overlay labels never encroach on or obscure the
+ * selected element or its text. Four equal sides collapse to one clean summary pill
+ * offset above the top edge; differing sides sit outside their respective edges and stack
+ * further out in 8px steps if any pills collide.
  */
 export function layoutRingPills(regions: readonly SpacingRegion[], labelOf: (r: SpacingRegion) => string): PillPlacement[] {
   const pills = regions.map((region): PillPlacement => {
     const text = labelOf(region);
     const c = center(region.rect);
-    return { side: region.side, region, text, x: c.x, y: c.y, w: pillWidth(text), h: PILL_H };
+    const base: PillPlacement = { side: region.side, region, text, x: c.x, y: c.y, w: pillWidth(text), h: PILL_H };
+    return outward(base, 1);
   });
-  for (let i = 0; i < pills.length; i++) {
-    const p = pills[i];
-    const vertical = p.side === "top" || p.side === "bottom";
-    if (thickness(p.region) < 1 || (vertical && thickness(p.region) < p.h)) pills[i] = outward(p, 1);
-  }
-  const collides = () => pills.some((a, i) => pills.some((b, j) => i < j && overlaps(a, b)));
-  if (!collides()) return pills;
   const texts = pills.map((p) => summaryText(p.text));
   if (pills.length === 4 && BOX_SIDES.every((side) => pills.some((p) => p.side === side)) && texts.every((t) => t === texts[0])) {
     const top = pills.find((p) => p.side === "top") ?? pills[0];
     const summary: PillPlacement = { ...top, side: "all", text: texts[0], w: pillWidth(texts[0]) };
-    const c = center(top.region.rect);
-    return [thickness(top.region) >= PILL_H ? { ...summary, x: c.x, y: c.y } : outward(summary, 1)];
-  }
-  // Pills that overhang their band (left/right pills wider than the band) move outward together, so the ring reads symmetric.
-  for (let i = 0; i < pills.length; i++) {
-    const p = pills[i];
-    const vertical = p.side === "top" || p.side === "bottom";
-    if (thickness(p.region) < (vertical ? p.h : p.w)) pills[i] = outward(p, 1);
+    return [outward(summary, 1)];
   }
   const placed: PillPlacement[] = [];
   for (const p of pills) {
     let next = p;
-    for (let steps = 1; steps <= 6 && placed.some((q) => overlaps(q, next)); steps++) next = outward(p, steps);
+    for (let steps = 2; steps <= 6 && placed.some((q) => overlaps(q, next)); steps++) next = outward(p, steps);
     placed.push(next);
-  }
-  // A pill left on its band may now sit under one that moved past it: move it out too.
-  for (let i = 0; i < placed.length; i++) {
-    for (let steps = 1; steps <= 6 && placed.some((q, j) => j !== i && overlaps(q, placed[i])); steps++) placed[i] = outward(pills[i], steps);
   }
   return placed;
 }
@@ -275,7 +257,7 @@ export function SpacingOverlay({ subMode, spacing, rings = [], hint, pins, guide
           })}
           {spacing.gridNote && on("note") && (
             <Label
-              at={{ x: spacing.border.x + spacing.border.width / 2, y: spacing.border.y + 8 }}
+              at={{ x: spacing.border.x + spacing.border.width / 2, y: spacing.border.y - PILL_GAP - PILL_H / 2 }}
               text={spacing.gridNote}
               color={GUIDE_COLOR}
               attr={{ ...layerAttr("note"), "data-annotate-grid-note": "" }}

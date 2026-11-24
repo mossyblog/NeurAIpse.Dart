@@ -141,10 +141,15 @@ export function useSpacingInspector({ surface, enabled, subMode }: SpacingInspec
     }
     const point = { x: event.clientX, y: event.clientY };
     if (box) {
-      // Click outside every zone (or on an element's content) deselects (spec 14.2).
+      // Click outside every zone deselects; clicking content of a different element selects its
+      // padding ring so buttons, panels, and containers can be picked directly for Spacing/Radius/Sizing.
       const hit = boxHitAt(point);
       const current = selectionRef.current;
-      if (!hit || hit.group === "content" || hit.cell == null) return selectBox(null);
+      if (!hit) return selectBox(null);
+      if (hit.group === "content" || hit.cell == null) {
+        if (current?.element === hit.element) return selectBox(null);
+        return selectBox({ group: "padding", sides: ["top", "right", "bottom", "left"], element: hit.element });
+      }
       const next = clickSelect(current, current?.element === hit.element, { group: hit.group, cell: hit.cell }, event.shiftKey);
       return selectBox({ ...next, element: hit.element });
     }

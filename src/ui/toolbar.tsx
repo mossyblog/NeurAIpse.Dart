@@ -59,7 +59,7 @@ import {
 } from "./chrome.tsx";
 import type { DragPointerHandlers } from "./use-drag-position.ts";
 
-type ToolMode = "annotate" | "spacing" | "type" | "color" | "layout" | "rearrange";
+type ToolMode = "annotate" | "spacing" | "type" | "color" | "layout" | "rearrange" | "measure-v" | "measure-h";
 
 const MODE_ORDER: readonly ToolMode[] = ["annotate", "spacing", "type", "color", "layout", "rearrange"];
 const GOOEY_PILLS: Record<Theme, { color: string; hover: string; shadow: number }> = {
@@ -300,6 +300,8 @@ const MODE_META: Record<Exclude<ToolMode, "annotate">, { label: string; dot: str
   color: { label: "Color", dot: "bg-[var(--annotate-marker-blue)]", hint: "Click to pick color" },
   layout: { label: "Layout", dot: "bg-[var(--annotate-marker-cyan)]", hint: "Click or drag components" },
   rearrange: { label: "Rearrange", dot: "bg-[var(--annotate-marker-orange)]", hint: "Drag to move · Del hides" },
+  "measure-v": { label: "Vertical ruler", dot: "bg-[var(--annotate-marker-pink)]", hint: "Hover & click to pin · Drag for custom · 2 horiz" },
+  "measure-h": { label: "Horizontal ruler", dot: "bg-[var(--annotate-marker-pink)]", hint: "Hover & click to pin · Drag for custom · 1 vert" },
 };
 
 const SEGMENT_BTN_ACTIVE =
@@ -911,10 +913,9 @@ export function Toolbar(props: ToolbarProps) {
           </NotchDockButton>
           <NotchDockButton
             {...sharedDockProps(7)}
-            label={props.markersHidden ? "Show markers" : "Hide markers"}
+            label={props.markersHidden ? "Show overlays" : "Hide overlays"}
             shortcut="H"
             pressed={props.markersHidden}
-            disabled={empty && !props.placementCount}
             onClick={props.onToggleMarkers}
           >
             {props.markersHidden ? <EyeOff /> : <Eye />}

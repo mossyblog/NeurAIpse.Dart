@@ -217,6 +217,40 @@ export type SideRow = { property: string; current: StyleValue; flags: string[] }
 /** One token chip: `p-4 · 16`, applied to every selected side at once. */
 export type TokenChip = { id: string; label: string; px: number; value: StyleValue; pressed: boolean };
 
+export type BoxPanelTab = "spacing" | "radius" | "sizing";
+export type CornerKey = "tl" | "tr" | "br" | "bl";
+export type SizingMode = "fill" | "hug" | "fixed";
+
+export type RadiusControlProps = {
+  corners: readonly CornerKey[];
+  values: Record<CornerKey, number>;
+  readout: string;
+  number: string;
+  chips: TokenChip[];
+  onCorner: (corner: CornerKey, additive: boolean) => void;
+  onPreset: (preset: "all" | "top" | "bottom" | "left" | "right") => void;
+  onValue: (value: StyleValue) => void;
+  onStep: (direction: 1 | -1, fine: boolean) => void;
+  onReset?: () => void;
+};
+
+export type AxisSizingProps = {
+  mode: SizingMode;
+  px: number;
+  modified: boolean;
+  onMode: (mode: SizingMode) => void;
+  onFixedPx: (px: number) => void;
+  onReset: () => void;
+};
+
+export type SizingControlProps = {
+  containerKind: string;
+  liveWidth: number;
+  liveHeight: number;
+  width: AxisSizingProps;
+  height: AxisSizingProps;
+};
+
 export type BoxPanelProps = {
   elementName: string;
   regionLabel: string;
@@ -240,6 +274,11 @@ export type BoxPanelProps = {
   onStep: (direction: 1 | -1, fine: boolean) => void;
   /** Reset pending changes covering the active selection. */
   onReset?: () => void;
+  /** Active inspector sub-tab (Spacing / Radius / Sizing). */
+  tab?: BoxPanelTab;
+  onTabChange?: (tab: BoxPanelTab) => void;
+  radius?: RadiusControlProps;
+  sizing?: SizingControlProps;
   /** Scope toggle: this element, or every element like it (spec 14.2). */
   scope?: { mode: "one" | "all"; count: number; onChange: (mode: "one" | "all") => void; onPreview: (on: boolean) => void };
   count?: number;
@@ -258,17 +297,417 @@ function activePreset(sides: readonly BoxSide[]): "all" | "vertical" | "horizont
   return null;
 }
 
+const CORNER_SHORT: Record<CornerKey, string> = { tl: "TL", tr: "TR", br: "BR", bl: "BL" };
+const RADIUS_TINT = "var(--annotate-marker-cyan, #06b6d4)";
+
+function activeCornerPreset(corners: readonly CornerKey[]): "all" | "top" | "bottom" | "left" | "right" | null {
+  if (corners.length === 4) return "all";
+  if (corners.length === 2 && corners.includes("tl") && corners.includes("tr")) return "top";
+  if (corners.length === 2 && corners.includes("bl") && corners.includes("br")) return "bottom";
+  if (corners.length === 2 && corners.includes("tl") && corners.includes("bl")) return "left";
+  if (corners.length === 2 && corners.includes("tr") && corners.includes("br")) return "right";
+  return null;
+}
+
+function RadiusTab({ radius }: { radius: RadiusControlProps }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const number = draft ?? radius.number;
+  const presetMatch = activeCornerPreset(radius.corners);
+
+  const cornerBtn = (c: CornerKey) => {
+    const selected = radius.corners.includes(c);
+    return (
+      <button
+        key={c}
+        type="button"
+        aria-pressed={selected}
+        aria-label={`${c.toUpperCase()} corner radius`}
+        data-annotate-corner={c}
+        className={cn(
+          "flex h-7 w-full cursor-pointer items-center justify-center gap-1 rounded-lg border px-1.5 font-mono text-[11px] leading-none tabular-nums transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+          selected
+            ? "font-semibold text-foreground"
+            : "border-border/50 bg-background/80 text-muted-foreground hover:border-border/80 hover:bg-background hover:text-foreground dark:bg-background/45 dark:hover:bg-background/70",
+        )}
+        style={
+          selected
+            ? {
+                borderColor: `color-mix(in oklch, ${RADIUS_TINT} 46%, transparent)`,
+                backgroundColor: `color-mix(in oklch, ${RADIUS_TINT} 12%, var(--background))`,
+                boxShadow: `0 0 0 2px color-mix(in oklch, ${RADIUS_TINT} 14%, transparent)`,
+              }
+            : undefined
+        }
+        onClick={(e) => {
+          setDraft(null);
+          radius.onCorner(c, e.shiftKey);
+        }}
+      >
+        <span className={cn("text-[10px] font-medium", selected ? "text-foreground/65" : "text-muted-foreground/70")}>
+          {CORNER_SHORT[c]}
+        </span>
+        <span>{radius.values[c]}</span>
+      </button>
+    );
+  };
+
+  return (
+    <div className="flex flex-col gap-3" data-annotate-radius-panel="">
+      <div className="flex flex-col gap-2.5 rounded-xl border border-border/50 bg-muted/30 p-3">
+        <div className="grid grid-cols-3 grid-rows-3 items-center gap-1.5">
+          {cornerBtn("tl")}
+          <span />
+          {cornerBtn("tr")}
+          <span />
+          <div
+            className="flex h-8 items-center justify-center border border-dashed border-border/70 bg-background/60 px-1.5 dark:bg-background/30"
+            style={{
+              borderTopLeftRadius: Math.min(14, radius.values.tl),
+              borderTopRightRadius: Math.min(14, radius.values.tr),
+              borderBottomRightRadius: Math.min(14, radius.values.br),
+              borderBottomLeftRadius: Math.min(14, radius.values.bl),
+            }}
+          >
+            <span className="truncate text-[10px] font-medium text-muted-foreground">Radius</span>
+          </div>
+          <span />
+          {cornerBtn("bl")}
+          <span />
+          {cornerBtn("br")}
+        </div>
+
+        <SegmentedControl className="grid w-full grid-cols-5" role="group" aria-label="Corner selection">
+          {(["all", "top", "bottom", "left", "right"] as const).map((preset) => {
+            const active = presetMatch === preset;
+            return (
+              <button
+                key={preset}
+                type="button"
+                aria-pressed={active}
+                data-annotate-radius-preset={preset}
+                className={cn(
+                  "h-6 cursor-pointer rounded-md px-1 text-[10px] font-medium transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                  active
+                    ? "bg-background text-foreground shadow-2xs ring-1 ring-foreground/[0.08] dark:bg-foreground/15 dark:ring-white/10"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+                onClick={() => {
+                  setDraft(null);
+                  radius.onPreset(preset);
+                }}
+              >
+                {preset[0].toUpperCase() + preset.slice(1)}
+              </button>
+            );
+          })}
+        </SegmentedControl>
+      </div>
+
+      <div className="flex items-center gap-1.5">
+        <div className="flex h-8 min-w-0 flex-1 items-center rounded-lg border border-border/70 bg-background/90 p-0.5 shadow-2xs transition-colors focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20 dark:bg-background/50">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Decrease radius"
+            title="Step down (Shift: −1px)"
+            onClick={(e) => {
+              setDraft(null);
+              radius.onStep(-1, e.shiftKey);
+            }}
+          >
+            <Minus />
+          </Button>
+          <div className="relative flex h-full min-w-0 flex-1 items-center border-x border-border/50">
+            <Input
+              aria-label="Corner radius in px"
+              data-annotate-radius-input=""
+              inputMode="decimal"
+              placeholder={radius.readout === "mixed" ? "mixed" : undefined}
+              className="h-full w-full min-w-0 bg-transparent px-7 text-center font-mono text-xs font-medium text-foreground tabular-nums outline-none placeholder:text-muted-foreground/70"
+              value={number}
+              onChange={(e) => {
+                const text = e.target.value;
+                setDraft(text);
+                const n = Number(text.trim());
+                if (text.trim() !== "" && Number.isFinite(n) && n >= 0) {
+                  radius.onValue({ value: `${Math.round(n * 100) / 100}px` });
+                }
+              }}
+              onBlur={() => setDraft(null)}
+            />
+            <span aria-hidden className="pointer-events-none absolute right-2 font-mono text-[10px] text-muted-foreground/75">
+              px
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Increase radius"
+            title="Step up (Shift: +1px)"
+            onClick={(e) => {
+              setDraft(null);
+              radius.onStep(1, e.shiftKey);
+            }}
+          >
+            <Plus />
+          </Button>
+        </div>
+        {radius.onReset && (
+          <Button
+            variant="outline"
+            size="sm"
+            data-annotate-radius-reset=""
+            className="h-8 shrink-0 rounded-lg px-2.5 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              setDraft(null);
+              radius.onReset?.();
+            }}
+          >
+            <RotateCcw className="size-3.5" />
+            Reset
+          </Button>
+        )}
+      </div>
+
+      {radius.chips.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <SectionLabel meta={<span className="font-mono text-[10px] text-muted-foreground tabular-nums">{radius.chips.length}</span>}>
+            Radius tokens
+          </SectionLabel>
+          <div className="annotate-scroll grid max-h-36 grid-cols-2 gap-1.5 overflow-y-auto p-px" data-annotate-radius-chips="">
+            {radius.chips.map((chip) => (
+              <Button
+                key={chip.id}
+                variant={chip.pressed ? "default" : "outline"}
+                size="xs"
+                aria-pressed={chip.pressed}
+                title={`${chip.label} · ${chip.px}px`}
+                className={cn(
+                  "h-7 min-w-0 justify-between gap-1.5 rounded-lg px-2 font-mono text-[11px] tabular-nums",
+                  !chip.pressed && "border-border/60 bg-background/70 hover:bg-muted/60 dark:bg-background/35",
+                )}
+                onClick={() => {
+                  setDraft(null);
+                  radius.onValue(chip.value);
+                }}
+              >
+                <span className="min-w-0 truncate">{chip.label}</span>
+                <span className={cn("shrink-0 text-[10px]", chip.pressed ? "opacity-75" : "text-muted-foreground")}>
+                  {chip.px >= 9999 ? "full" : `${chip.px}px`}
+                </span>
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AxisSizingRow({ label, axis }: { label: string; axis: AxisSizingProps }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const val = draft ?? String(axis.px);
+
+  return (
+    <div
+      data-annotate-sizing-axis={label.toLowerCase()}
+      className={cn(
+        "flex flex-col gap-2 rounded-xl border p-2.5 transition-colors",
+        axis.modified ? "border-primary/25 bg-muted/50" : "border-border/50 bg-muted/30",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-foreground">{label}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{`${axis.px}px`}</span>
+          {axis.modified && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={`Reset ${label}`}
+              title={`Reset ${label}`}
+              className="size-5 text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                setDraft(null);
+                axis.onReset();
+              }}
+            >
+              <RotateCcw className="size-3" />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <SegmentedControl className="grid w-full grid-cols-3" role="group" aria-label={`${label} sizing mode`}>
+        {(["fill", "hug", "fixed"] as const).map((m) => {
+          const active = axis.mode === m;
+          return (
+            <button
+              key={m}
+              type="button"
+              aria-pressed={active}
+              data-annotate-sizing-mode={m}
+              className={cn(
+                "h-6 cursor-pointer rounded-md px-2 text-[11px] font-medium transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                active
+                  ? "bg-background text-foreground shadow-2xs ring-1 ring-foreground/[0.08] dark:bg-foreground/15 dark:ring-white/10"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => {
+                setDraft(null);
+                axis.onMode(m);
+              }}
+            >
+              {m[0].toUpperCase() + m.slice(1)}
+            </button>
+          );
+        })}
+      </SegmentedControl>
+
+      {axis.mode === "fixed" && (
+        <div className="flex h-7 items-center rounded-lg border border-border/70 bg-background/90 p-0.5 shadow-2xs focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20 dark:bg-background/50">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Decrease ${label}`}
+            onClick={(e) => {
+              setDraft(null);
+              axis.onFixedPx(Math.max(0, axis.px - (e.shiftKey ? 1 : 8)));
+            }}
+          >
+            <Minus />
+          </Button>
+          <div className="relative flex h-full min-w-0 flex-1 items-center border-x border-border/50">
+            <Input
+              aria-label={`${label} in px`}
+              inputMode="decimal"
+              className="h-full w-full min-w-0 bg-transparent px-6 text-center font-mono text-xs font-medium text-foreground tabular-nums outline-none"
+              value={val}
+              onChange={(e) => {
+                const text = e.target.value;
+                setDraft(text);
+                const n = Number(text.trim());
+                if (text.trim() !== "" && Number.isFinite(n) && n >= 0) axis.onFixedPx(Math.round(n));
+              }}
+              onBlur={() => setDraft(null)}
+            />
+            <span aria-hidden className="pointer-events-none absolute right-2 font-mono text-[10px] text-muted-foreground/75">
+              px
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Increase ${label}`}
+            onClick={(e) => {
+              setDraft(null);
+              axis.onFixedPx(axis.px + (e.shiftKey ? 1 : 8));
+            }}
+          >
+            <Plus />
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SizingTab({ sizing }: { sizing: SizingControlProps }) {
+  return (
+    <div className="flex flex-col gap-2.5" data-annotate-sizing-panel="">
+      <div className="flex items-center justify-between gap-2 rounded-xl border border-border/50 bg-muted/35 px-3 py-2">
+        <span className="text-xs font-medium text-foreground">{sizing.containerKind}</span>
+        <span className="rounded-md bg-background/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground tabular-nums ring-1 ring-foreground/[0.06] dark:bg-background/45 dark:ring-white/[0.08]">
+          {`${sizing.liveWidth} × ${sizing.liveHeight}`}
+        </span>
+      </div>
+      <AxisSizingRow label="Width" axis={sizing.width} />
+      <AxisSizingRow label="Height" axis={sizing.height} />
+    </div>
+  );
+}
+
+function PaddingSideIcon({ side }: { side: BoxSide | "horizontal" | "vertical" }) {
+  return (
+    <svg viewBox="0 0 14 14" className="size-3.5 shrink-0" aria-hidden>
+      {side === "horizontal" && (
+        <>
+          <line x1="2" y1="2.5" x2="2" y2="11.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          <line x1="12" y1="2.5" x2="12" y2="11.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          <rect x="4.75" y="4.5" width="4.5" height="5" rx="1" fill="none" stroke="currentColor" strokeOpacity="0.55" strokeWidth="1.2" />
+        </>
+      )}
+      {side === "vertical" && (
+        <>
+          <line x1="2.5" y1="2" x2="11.5" y2="2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          <line x1="2.5" y1="12" x2="11.5" y2="12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          <rect x="4.5" y="4.75" width="5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeOpacity="0.55" strokeWidth="1.2" />
+        </>
+      )}
+      {side === "left" && (
+        <>
+          <line x1="2" y1="2.5" x2="2" y2="11.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          <rect x="4.75" y="4" width="6.5" height="6" rx="1.2" fill="none" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.2" />
+        </>
+      )}
+      {side === "right" && (
+        <>
+          <line x1="12" y1="2.5" x2="12" y2="11.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          <rect x="2.75" y="4" width="6.5" height="6" rx="1.2" fill="none" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.2" />
+        </>
+      )}
+      {side === "top" && (
+        <>
+          <line x1="2.5" y1="2" x2="11.5" y2="2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          <rect x="4" y="4.75" width="6" height="6.5" rx="1.2" fill="none" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.2" />
+        </>
+      )}
+      {side === "bottom" && (
+        <>
+          <line x1="2.5" y1="12" x2="11.5" y2="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          <rect x="4" y="2.75" width="6" height="6.5" rx="1.2" fill="none" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.2" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 /**
- * Box panel (spec 14.2): a sleek Figma/Webflow-inspired spacing pad synced with the canvas
- * selection, compact axis presets, tactile numeric stepper, contextual token chips,
- * and scope toggle when multiple matching elements exist.
+ * Box panel (spec 14.2): Figma/Pencil-inspired spacing controls with linked H/V or
+ * individual 2×2 per-side selection synced to design tokens, plus Radius (4-corner
+ * tokens) and Sizing (Fill / Hug / Fixed) tabs.
  */
 export function BoxPanel(props: BoxPanelProps) {
   const [draft, setDraft] = useState<string | null>(null);
+  const [individual, setIndividual] = useState(false);
+  const tab: BoxPanelTab = props.tab ?? "spacing";
+  const showTabs = Boolean(props.radius || props.sizing);
   const number = draft ?? props.number;
   const gap = props.group === "gap";
   const tint = GROUP_TINT[props.group];
   const presetMatch = activePreset(props.sides);
+  const showIndividual = individual || presetMatch === null;
+
+  const hVal =
+    props.values?.left != null && props.values?.right != null
+      ? props.values.left === props.values.right
+        ? String(props.values.left)
+        : "mix"
+      : props.values?.left != null
+        ? String(props.values.left)
+        : props.values?.right != null
+          ? String(props.values.right)
+          : "0";
+  const vVal =
+    props.values?.top != null && props.values?.bottom != null
+      ? props.values.top === props.values.bottom
+        ? String(props.values.top)
+        : "mix"
+      : props.values?.top != null
+        ? String(props.values.top)
+        : props.values?.bottom != null
+          ? String(props.values.bottom)
+          : "0";
 
   // Only show per-side detail rows when they carry real token or drift information
   // (avoids repeating 4 identical plain px rows already visible in the box pad).
@@ -282,12 +721,13 @@ export function BoxPanel(props: BoxPanelProps) {
     const val = props.values?.[side];
     return (
       <button
+        key={side}
         type="button"
         aria-pressed={selected}
         aria-label={`${side} side`}
         data-annotate-cell={side}
         className={cn(
-          "flex h-7 w-full cursor-pointer items-center justify-center gap-1 rounded-lg border px-1.5 font-mono text-[11px] leading-none tabular-nums transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+          "flex h-7 w-full cursor-pointer items-center justify-between gap-1.5 rounded-lg border px-2 font-mono text-[11px] leading-none tabular-nums transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
           selected
             ? "font-semibold text-foreground"
             : "border-border/50 bg-background/80 text-muted-foreground hover:border-border/80 hover:bg-background hover:text-foreground dark:bg-background/45 dark:hover:bg-background/70",
@@ -295,9 +735,9 @@ export function BoxPanel(props: BoxPanelProps) {
         style={
           selected
             ? {
-                borderColor: `color-mix(in oklch, ${tint} 42%, transparent)`,
+                borderColor: `color-mix(in oklch, ${tint} 46%, transparent)`,
                 backgroundColor: `color-mix(in oklch, ${tint} 12%, var(--background))`,
-                boxShadow: `0 0 0 2px color-mix(in oklch, ${tint} 14%, transparent)`,
+                boxShadow: `0 0 0 1.5px color-mix(in oklch, ${tint} 16%, transparent)`,
               }
             : undefined
         }
@@ -306,8 +746,9 @@ export function BoxPanel(props: BoxPanelProps) {
           props.onCell(side, event.shiftKey);
         }}
       >
-        <span className={cn("text-[10px] font-medium", selected ? "text-foreground/65" : "text-muted-foreground/70")}>
-          {SIDE_SHORT[side]}
+        <span className={cn("inline-flex items-center gap-1.5", selected ? "text-foreground/80" : "text-muted-foreground/80")}>
+          <PaddingSideIcon side={side} />
+          <span className="font-sans text-[10px] font-medium">{SIDE_SHORT[side]}</span>
         </span>
         {val != null && <span>{val}</span>}
       </button>
@@ -327,6 +768,44 @@ export function BoxPanel(props: BoxPanelProps) {
       onCopy={props.onCopy}
     >
       <div className="flex flex-col gap-3" data-annotate-box-panel={props.group}>
+        {showTabs && (
+          <SegmentedControl className="grid w-full grid-cols-3" role="tablist" aria-label="Inspector section">
+            {(
+              [
+                ["spacing", "Spacing"],
+                ["radius", "Radius"],
+                ["sizing", "Sizing"],
+              ] as const
+            ).map(([id, label]) => {
+              const active = tab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  data-annotate-box-tab={id}
+                  className={cn(
+                    "h-6 cursor-pointer rounded-md px-2 text-[11px] font-medium transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                    active
+                      ? "bg-background text-foreground shadow-2xs ring-1 ring-foreground/[0.08] dark:bg-foreground/15 dark:ring-white/10"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                  onClick={() => props.onTabChange?.(id)}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </SegmentedControl>
+        )}
+
+        {tab === "radius" && props.radius ? (
+          <RadiusTab radius={props.radius} />
+        ) : tab === "sizing" && props.sizing ? (
+          <SizingTab sizing={props.sizing} />
+        ) : (
+          <>
         {gap ? (
           <div
             data-annotate-box-diagram="gap"
@@ -345,52 +824,150 @@ export function BoxPanel(props: BoxPanelProps) {
             </span>
           </div>
         ) : (
-          <div className="flex flex-col gap-2.5 rounded-xl border border-border/50 bg-muted/30 p-3">
-            <div
-              data-annotate-box-diagram={props.group}
-              className="grid grid-cols-3 grid-rows-3 items-center gap-1.5"
-            >
-              <span />
-              {cell("top")}
-              <span />
-              {cell("left")}
-              <div className="flex h-7 items-center justify-center gap-1.5 rounded-lg border border-dashed border-border/60 bg-background/55 px-1.5 dark:bg-background/25">
-                <span aria-hidden className="size-1.5 shrink-0 rounded-full opacity-80" style={{ backgroundColor: tint }} />
-                <span className="truncate text-[10px] font-medium text-muted-foreground">
-                  {GROUP_LABEL[props.group]}
-                </span>
+          <div className="flex flex-col gap-2 rounded-xl border border-border/50 bg-muted/30 p-2.5" data-annotate-box-diagram={props.group}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: tint }} />
+                {GROUP_LABEL[props.group]}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-pressed={presetMatch === "all"}
+                  data-annotate-preset="all"
+                  onClick={() => {
+                    setDraft(null);
+                    setIndividual(false);
+                    props.onPreset("all");
+                  }}
+                  className={cn(
+                    "h-6 cursor-pointer rounded-md px-2 text-[10px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                    presetMatch === "all" && !showIndividual
+                      ? "bg-background text-foreground shadow-2xs ring-1 ring-foreground/[0.08] dark:bg-foreground/15 dark:ring-white/10"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  aria-label="Individual sides"
+                  aria-pressed={showIndividual}
+                  title="Individual sides (T, R, B, L)"
+                  data-annotate-individual-sides=""
+                  onClick={() => {
+                    setDraft(null);
+                    if (showIndividual) {
+                      setIndividual(false);
+                      if (presetMatch === null) props.onPreset("all");
+                    } else {
+                      setIndividual(true);
+                    }
+                  }}
+                  className={cn(
+                    "flex size-6 cursor-pointer items-center justify-center rounded-md border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                    showIndividual
+                      ? "border-primary/60 bg-primary/15 text-primary"
+                      : "border-border/60 bg-background/75 text-muted-foreground hover:bg-muted hover:text-foreground dark:bg-background/40",
+                  )}
+                >
+                  <svg viewBox="0 0 14 14" className="size-3.5" aria-hidden>
+                    <rect x="2.25" y="2.25" width="9.5" height="9.5" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                  </svg>
+                </button>
               </div>
-              {cell("right")}
-              <span />
-              {cell("bottom")}
-              <span />
             </div>
 
-            <SegmentedControl className="grid w-full grid-cols-3" role="group" aria-label="Side selection">
-              {(["all", "vertical", "horizontal"] as const).map((preset) => {
-                const active = presetMatch === preset;
-                return (
-                  <button
-                    key={preset}
-                    type="button"
-                    aria-pressed={active}
-                    data-annotate-preset={preset}
-                    className={cn(
-                      "h-6 cursor-pointer rounded-md px-2 text-[11px] font-medium transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-                      active
-                        ? "bg-background text-foreground shadow-2xs ring-1 ring-foreground/[0.08] dark:bg-foreground/15 dark:ring-white/10"
-                        : "text-muted-foreground hover:text-foreground",
+            {showIndividual ? (
+              <div className="grid grid-cols-2 gap-1.5">
+                {cell("left")}
+                {cell("right")}
+                {cell("top")}
+                {cell("bottom")}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  aria-pressed={presetMatch === "horizontal" || presetMatch === "all"}
+                  data-annotate-preset="horizontal"
+                  onClick={() => {
+                    setDraft(null);
+                    props.onPreset(presetMatch === "horizontal" ? "all" : "horizontal");
+                  }}
+                  className={cn(
+                    "flex h-7 w-full cursor-pointer items-center justify-between gap-1.5 rounded-lg border px-2 font-mono text-[11px] leading-none tabular-nums transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                    presetMatch === "horizontal" || presetMatch === "all"
+                      ? "font-semibold text-foreground"
+                      : "border-border/50 bg-background/80 text-muted-foreground hover:border-border/80 hover:bg-background hover:text-foreground dark:bg-background/45",
+                  )}
+                  style={
+                    presetMatch === "horizontal" || presetMatch === "all"
+                      ? {
+                          borderColor: `color-mix(in oklch, ${tint} 46%, transparent)`,
+                          backgroundColor: `color-mix(in oklch, ${tint} 12%, var(--background))`,
+                        }
+                      : undefined
+                  }
+                >
+                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                    <PaddingSideIcon side="horizontal" />
+                    <span className="font-sans text-[10px] font-medium">H</span>
+                  </span>
+                  <span>{hVal}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={presetMatch === "vertical" || presetMatch === "all"}
+                  data-annotate-preset="vertical"
+                  onClick={() => {
+                    setDraft(null);
+                    props.onPreset(presetMatch === "vertical" ? "all" : "vertical");
+                  }}
+                  className={cn(
+                    "flex h-7 w-full cursor-pointer items-center justify-between gap-1.5 rounded-lg border px-2 font-mono text-[11px] leading-none tabular-nums transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                    presetMatch === "vertical" || presetMatch === "all"
+                      ? "font-semibold text-foreground"
+                      : "border-border/50 bg-background/80 text-muted-foreground hover:border-border/80 hover:bg-background hover:text-foreground dark:bg-background/45",
+                  )}
+                  style={
+                    presetMatch === "vertical" || presetMatch === "all"
+                      ? {
+                          borderColor: `color-mix(in oklch, ${tint} 46%, transparent)`,
+                          backgroundColor: `color-mix(in oklch, ${tint} 12%, var(--background))`,
+                        }
+                      : undefined
+                  }
+                >
+                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                    <PaddingSideIcon side="vertical" />
+                    <span className="font-sans text-[10px] font-medium">V</span>
+                  </span>
+                  <span>{vVal}</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {detailRows.length > 0 && (
+          <div className="divide-y divide-border/40 rounded-xl border border-border/40 bg-muted/25 px-2.5 py-0.5">
+            {detailRows.map((row) => (
+              <div key={row.property} data-annotate-panel-row={row.property} className="flex items-center justify-between gap-2 py-1.5 text-[11px]">
+                <span className="shrink-0 font-mono text-muted-foreground">{row.property}</span>
+                <span className="flex min-w-0 flex-wrap items-center justify-end gap-1">
+                  <span data-annotate-current className="flex min-w-0 max-w-full font-mono text-foreground tabular-nums">
+                    <span className="shrink-0">{row.current.value}</span>
+                    {row.current.token && (
+                      <span className="truncate text-muted-foreground" title={row.current.token}>
+                        {`\u00a0· ${row.current.token}`}
+                      </span>
                     )}
-                    onClick={() => {
-                      setDraft(null);
-                      props.onPreset(preset);
-                    }}
-                  >
-                    {preset[0].toUpperCase() + preset.slice(1)}
-                  </button>
-                );
-              })}
-            </SegmentedControl>
+                  </span>
+                  <FlagBadges flags={row.flags.filter((f) => f !== "no token")} />
+                </span>
+              </div>
+            ))}
           </div>
         )}
 
@@ -542,26 +1119,7 @@ export function BoxPanel(props: BoxPanelProps) {
             </SegmentedControl>
           </div>
         )}
-
-        {detailRows.length > 0 && (
-          <div className="divide-y divide-border/40 rounded-xl border border-border/40 bg-muted/25 px-2.5 py-0.5">
-            {detailRows.map((row) => (
-              <div key={row.property} data-annotate-panel-row={row.property} className="flex items-center justify-between gap-2 py-1.5 text-[11px]">
-                <span className="shrink-0 font-mono text-muted-foreground">{row.property}</span>
-                <span className="flex min-w-0 flex-wrap items-center justify-end gap-1">
-                  <span data-annotate-current className="flex min-w-0 max-w-full font-mono text-foreground tabular-nums">
-                    <span className="shrink-0">{row.current.value}</span>
-                    {row.current.token && (
-                      <span className="truncate text-muted-foreground" title={row.current.token}>
-                        {`\u00a0· ${row.current.token}`}
-                      </span>
-                    )}
-                  </span>
-                  <FlagBadges flags={row.flags.filter((f) => f !== "no token")} />
-                </span>
-              </div>
-            ))}
-          </div>
+          </>
         )}
       </div>
     </PanelFrame>

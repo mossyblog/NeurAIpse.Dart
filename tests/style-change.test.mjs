@@ -197,7 +197,7 @@ test("T toggles the type inspector and K the colour inspector (C stays Copy)", a
   assert.equal(resolveShortcut(key("K"), state()), "color");
   assert.equal(resolveShortcut(key("k"), state({ editableTarget: true })), null);
   assert.equal(resolveShortcut(key("t", { ctrlKey: true }), state()), null);
-  assert.equal(resolveShortcut(key("h"), state({ styleChangeCount: 2 })), null);
+  assert.equal(resolveShortcut(key("h"), state({ styleChangeCount: 2 })), "hide");
   assert.equal(resolveShortcut(key("s"), state({ styleChangeCount: 1, canSend: true })), "send");
 });
 

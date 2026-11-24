@@ -21,6 +21,7 @@ import { guideFor, measureBetween, primaryDistance, type Guide, type Measurement
 import { BOX_SIDES, parsePx, regionProperty, type BoxSide, type SpacingRegion, type TokenResolver } from "../core/spacing.ts";
 import { elementSpacing, type ElementSpacing } from "../core/spacing-dom.ts";
 import { GROUP_ATTRIBUTE, spacingTokens, tokenId, type SpacingToken, type StyleValue } from "../core/style-change.ts";
+import { radiusTokens } from "../core/token-catalog.ts";
 import { resolutionLabel, readRootVars } from "../core/tokens-dom.ts";
 import { parseMultiplierToken, shiftUtility, tokenDisplayLabel } from "../core/token-values.ts";
 import type { Annotation, Rect } from "../core/types.ts";
@@ -28,7 +29,18 @@ import { GroupOverlay } from "./group-overlay.tsx";
 import { EDIT_NOT_FOUND, elementSerial, type InspectorContext } from "./inspector-context.ts";
 import { SpacingAids } from "./spacing-aids.tsx";
 import { SpacingOverlay, type BoxRing } from "./spacing-overlay.tsx";
-import { BoxPanel, SpacingPanel, type PanelRow, type SideRow, type TokenChip } from "./spacing-panel.tsx";
+import {
+  BoxPanel,
+  SpacingPanel,
+  type BoxPanelTab,
+  type CornerKey,
+  type PanelRow,
+  type RadiusControlProps,
+  type SideRow,
+  type SizingControlProps,
+  type SizingMode,
+  type TokenChip,
+} from "./spacing-panel.tsx";
 import { resolveTarget, targetRect, useSpacingInspector, type BoxSelected } from "./use-spacing-inspector.ts";
 import { useHandleDrag, type HandleDrag, type HandleTarget } from "./use-handle-drag.ts";
 import { measureRecord, memberLabel, previewValue, type StyleChangesApi } from "./use-style-changes.ts";
@@ -271,6 +283,8 @@ function BoxInspector({ ctx }: { ctx: InspectorContext }) {
   const setScopePreview = (preview: boolean) => setScopeState((s) => ({ anchor, mode: s.anchor === anchor ? s.mode : "one", preview }));
   const members = useMemo(() => (anchor ? scopeMembers(anchor, (el) => el === surface.host) : []), [anchor, surface]);
   const elements = anchor ? (scope === "all" ? members : [anchor]) : [];
+  const [panelTab, setPanelTab] = useState<BoxPanelTab>("spacing");
+  const [radiusCorners, setRadiusCorners] = useState<CornerKey[]>(["tl", "tr", "br", "bl"]);
 
   useEffect(() => redraw(), [styles.items, redraw]);
   useEffect(() => resolver.subscribe(redraw), [resolver, redraw]);
@@ -553,6 +567,286 @@ function BoxInspector({ ctx }: { ctx: InspectorContext }) {
     for (const id of coveringIds) styles.remove(id);
   };
 
+  /* ---------- Radius & Sizing (Fill / Hug / Fixed) controls ---------- */
+  const CORNER_PROP: Record<CornerKey, string> = {
+    tl: "border-top-left-radius",
+    tr: "border-top-right-radius",
+    br: "border-bottom-right-radius",
+    bl: "border-bottom-left-radius",
+  };
+  const ALL_CORNERS: CornerKey[] = ["tl", "tr", "br", "bl"];
+
+  const radiusControl: RadiusControlProps | undefined = (() => {
+    if (!anchor) return undefined;
+    const cs = getComputedStyle(anchor);
+    const cornerValues: Record<CornerKey, number> = {
+      tl: Math.round((Number.parseFloat(cs.borderTopLeftRadius) || 0) * 100) / 100,
+      tr: Math.round((Number.parseFloat(cs.borderTopRightRadius) || 0) * 100) / 100,
+      br: Math.round((Number.parseFloat(cs.borderBottomRightRadius) || 0) * 100) / 100,
+      bl: Math.round((Number.parseFloat(cs.borderBottomLeftRadius) || 0) * 100) / 100,
+    };
+    const activeVals = radiusCorners.map((c) => cornerValues[c]);
+    const rReadout = valueReadout(activeVals);
+    const rMixed = rReadout === "mixed";
+    const rTokens = radiusTokens(readRootVars(document), rootFontPx());
+    const rProps = radiusCorners.length === 4 ? ["border-radius"] : radiusCorners.map((c) => CORNER_PROP[c]);
+    const radiusRecords = styles.items.filter(
+      (a) =>
+        a.kind === "style-change" &&
+        a.styleChange?.category === "spacing" &&
+        (a.styleChange.property === "border-radius" || Object.values(CORNER_PROP).includes(a.styleChange.property)) &&
+        elements.some((el) => styles.elementsFor(a).includes(el)),
+    );
+    const namedRadiusToken = radiusRecords.map((a) => a.styleChange?.to.token).find(Boolean);
+    const rChips: TokenChip[] = rTokens.map((t) => ({
+      id: t.token,
+      label: t.token,
+      px: t.px ?? 0,
+      value: { value: `${t.px ?? 0}px`, token: t.token },
+      pressed: !rMixed && activeVals.length > 0 && (namedRadiusToken ? namedRadiusToken === t.token : Math.abs(activeVals[0] - (t.px ?? 0)) < 0.5),
+    }));
+    const applyRadius = (next: StyleValue) => {
+      const groupKey = scope === "all" && elements.length > 1 ? `rad:${elementSerial(anchor)}:all` : `rad:${elementSerial(anchor)}`;
+      const name = memberLabel(anchor);
+      if (rProps.length === 1 && rProps[0] === "border-radius") {
+        // Remove any per-corner records when applying uniform border-radius.
+        for (const a of radiusRecords) {
+          if (a.styleChange?.property !== "border-radius") styles.remove(a.id);
+        }
+      } else {
+        // Remove uniform border-radius record when editing individual corners.
+        for (const a of radiusRecords) {
+          if (a.styleChange?.property === "border-radius") styles.remove(a.id);
+        }
+      }
+      for (const prop of rProps) {
+        const existing = styles.findFor(anchor, prop);
+        const fromVal = existing?.styleChange?.from ?? { value: computedValue(anchor, prop === "border-radius" ? "border-top-left-radius" : prop) };
+        styles.upsert({
+          category: "spacing",
+          property: prop,
+          groupId: groupKey,
+          elements,
+          from: fromVal,
+          to: next,
+          detail: { name },
+        });
+      }
+    };
+    return {
+      corners: radiusCorners,
+      values: cornerValues,
+      readout: rReadout,
+      number: rMixed || !activeVals.length ? "" : String(activeVals[0]),
+      chips: rChips,
+      onCorner: (corner, additive) => {
+        if (!additive) {
+          setRadiusCorners((cur) => (cur.length === 1 && cur[0] === corner ? ALL_CORNERS : [corner]));
+          return;
+        }
+        setRadiusCorners((cur) => (cur.includes(corner) ? (cur.length > 1 ? cur.filter((c) => c !== corner) : cur) : [...cur, corner]));
+      },
+      onPreset: (preset) => {
+        if (preset === "all") setRadiusCorners(ALL_CORNERS);
+        else if (preset === "top") setRadiusCorners(["tl", "tr"]);
+        else if (preset === "bottom") setRadiusCorners(["bl", "br"]);
+        else if (preset === "left") setRadiusCorners(["tl", "bl"]);
+        else setRadiusCorners(["tr", "br"]);
+      },
+      onValue: applyRadius,
+      onStep: (direction, fine) => {
+        const base = activeVals[0] ?? 0;
+        const delta = fine ? 1 : 2;
+        const nextPx = Math.max(0, Math.round((base + direction * delta) * 100) / 100);
+        applyRadius({ value: `${nextPx}px` });
+      },
+      onReset: radiusRecords.length > 0 ? () => radiusRecords.forEach((a) => styles.remove(a.id)) : undefined,
+    };
+  })();
+
+  const sizingControl: SizingControlProps | undefined = (() => {
+    if (!anchor) return undefined;
+    const cs = getComputedStyle(anchor);
+    const rect = anchor.getBoundingClientRect();
+    const display = cs.display;
+    const containerKind = display.includes("flex")
+      ? "Flex container"
+      : display.includes("grid")
+        ? "Grid container"
+        : anchor.children.length > 0
+          ? "Container"
+          : "Element";
+
+    const parent = anchor.parentElement;
+    const parentCs = parent ? getComputedStyle(parent) : null;
+    const parentDisplay = parentCs?.display ?? "";
+    const isFlexParent = parentDisplay.includes("flex");
+    const isGridParent = parentDisplay.includes("grid");
+    const isFlexCol = isFlexParent && (parentCs?.flexDirection ?? "row").startsWith("column");
+    const isFlexRow = isFlexParent && !isFlexCol;
+
+    const buildAxis = (axis: "width" | "height") => {
+      const livePx = Math.round(axis === "width" ? rect.width : rect.height);
+      const isMainAxis = (axis === "width" && isFlexRow) || (axis === "height" && isFlexCol);
+      const isCrossAxis = (axis === "height" && isFlexRow) || (axis === "width" && isFlexCol);
+      const companionProp = isMainAxis
+        ? "flex"
+        : isCrossAxis
+          ? "align-self"
+          : isGridParent
+            ? axis === "width"
+              ? "justify-self"
+              : "align-self"
+            : null;
+
+      const maxProp = axis === "width" ? "max-width" : "max-height";
+      const rec = styles.findFor(anchor, axis);
+      const companionRec = companionProp ? styles.findFor(anchor, companionProp) : undefined;
+      const maxRec = styles.findFor(anchor, maxProp);
+      const pendingVal = rec?.styleChange?.to.value;
+
+      let mode: SizingMode;
+      if (pendingVal === "100%" || pendingVal === "100vh") {
+        mode = "fill";
+      } else if (pendingVal === "fit-content") {
+        mode = "hug";
+      } else if (pendingVal) {
+        mode = "fixed";
+      } else if (isMainAxis && Number.parseFloat(cs.flexGrow) > 0) {
+        mode = "fill";
+      } else if ((anchor as HTMLElement).style?.[axis]?.endsWith("px")) {
+        mode = "fixed";
+      } else if (
+        axis === "width" &&
+        parent &&
+        !display.startsWith("inline") &&
+        Math.abs(parent.clientWidth - Number.parseFloat(parentCs?.paddingLeft ?? "0") - Number.parseFloat(parentCs?.paddingRight ?? "0") - rect.width) <= 2
+      ) {
+        mode = "fill";
+      } else {
+        mode = "hug";
+      }
+
+      const upsertProp = (prop: string, fromValue: string, toValue: string) => {
+        const groupKey = scope === "all" && elements.length > 1 ? `size:${elementSerial(anchor)}:${axis}:all` : `size:${elementSerial(anchor)}:${axis}`;
+        const existing = styles.findFor(anchor, prop);
+        styles.upsert({
+          category: "spacing",
+          property: prop,
+          groupId: groupKey,
+          elements,
+          from: existing?.styleChange?.from ?? { value: fromValue },
+          to: { value: toValue },
+          detail: { name: memberLabel(anchor) },
+        });
+      };
+
+      const syncGridTracks = (anchorMode: SizingMode | null, fixedPx?: number) => {
+        if (!isGridParent || !parent || axis !== "width") return;
+        const siblings = Array.from(parent.children).filter(
+          (c) => !["script", "style", "template"].includes(c.localName) && c !== surface.host,
+        );
+        const colCount = (parentCs?.gridTemplateColumns ?? "").trim().split(/\s+/).filter(Boolean).length;
+        if (siblings.length <= 1 || siblings.length !== colCount) return;
+
+        let anyNonFill = false;
+        const tracks = siblings.map((sib) => {
+          if (sib === anchor) {
+            if (anchorMode === null || anchorMode === "fill") return "minmax(0, 1fr)";
+            anyNonFill = true;
+            return anchorMode === "hug" ? "auto" : `${Math.max(0, Math.round(fixedPx ?? livePx))}px`;
+          }
+          const sibRec = styles.findFor(sib, "width")?.styleChange?.to.value;
+          if (sibRec === "fit-content") {
+            anyNonFill = true;
+            return "auto";
+          }
+          if (sibRec && sibRec !== "100%" && sibRec.endsWith("px")) {
+            anyNonFill = true;
+            return sibRec;
+          }
+          return "minmax(0, 1fr)";
+        });
+
+        const parentRec = styles.findFor(parent, "grid-template-columns");
+        if (!anyNonFill) {
+          if (parentRec) styles.remove(parentRec.id);
+          return;
+        }
+        styles.upsert({
+          category: "spacing",
+          property: "grid-template-columns",
+          groupId: `size-grid:${elementSerial(parent)}:cols`,
+          elements: [parent],
+          from: parentRec?.styleChange?.from ?? { value: parentCs?.gridTemplateColumns ?? "" },
+          to: { value: tracks.join(" ") },
+          detail: { name: memberLabel(parent) },
+        });
+      };
+
+      const applyMode = (next: SizingMode, fixedPx?: number) => {
+        // In CSS, height: 100% collapses to auto on body or direct children of an auto-height body.
+        const useViewportHeight =
+          axis === "height" &&
+          next === "fill" &&
+          !isMainAxis &&
+          !isCrossAxis &&
+          !isGridParent &&
+          (anchor === document.body || parent === document.body || parent === document.documentElement);
+        const sizeVal =
+          next === "fill"
+            ? useViewportHeight
+              ? "100vh"
+              : "100%"
+            : next === "hug"
+              ? "fit-content"
+              : `${Math.max(0, Math.round(fixedPx ?? livePx))}px`;
+        upsertProp(axis, `${livePx}px`, sizeVal);
+
+        // Clear max-width / max-height clamp (e.g. max-width: 1040px) when Fill or Fixed is chosen.
+        const currentMax = axis === "width" ? cs.maxWidth : cs.maxHeight;
+        if ((next === "fill" || next === "fixed") && currentMax && currentMax !== "none") {
+          upsertProp(maxProp, currentMax, "none");
+        } else if (next === "hug" && maxRec) {
+          styles.remove(maxRec.id);
+        }
+
+        if (isMainAxis) {
+          const fromFlex = `${cs.flexGrow} ${cs.flexShrink} ${cs.flexBasis}`;
+          upsertProp("flex", fromFlex, next === "fill" ? "1 1 0%" : "0 0 auto");
+        } else if (isCrossAxis) {
+          upsertProp("align-self", cs.alignSelf || "auto", next === "fill" ? "stretch" : "flex-start");
+        } else if (isGridParent && companionProp) {
+          const fromSelf = companionProp === "justify-self" ? cs.justifySelf || "auto" : cs.alignSelf || "auto";
+          upsertProp(companionProp, fromSelf, next === "fill" ? "stretch" : "start");
+          syncGridTracks(next, fixedPx);
+        }
+      };
+
+      return {
+        mode,
+        px: livePx,
+        modified: Boolean(rec || companionRec || maxRec),
+        onMode: (next: SizingMode) => applyMode(next),
+        onFixedPx: (px: number) => applyMode("fixed", px),
+        onReset: () => {
+          if (rec) styles.remove(rec.id);
+          if (companionRec) styles.remove(companionRec.id);
+          if (maxRec) styles.remove(maxRec.id);
+          syncGridTracks(null);
+        },
+      };
+    };
+
+    return {
+      containerKind,
+      liveWidth: Math.round(rect.width),
+      liveHeight: Math.round(rect.height),
+      width: buildAxis("width"),
+      height: buildAxis("height"),
+    };
+  })();
+
   return (
     <>
       <SpacingOverlay subMode="box" spacing={outlineSpacing} rings={rings} hint={hint} pins={[]} guides={[]} measurement={null} resolveToken={resolveToken} />
@@ -585,6 +879,10 @@ function BoxInspector({ ctx }: { ctx: InspectorContext }) {
           onValue={apply}
           onStep={step}
           onReset={coveringIds.length > 0 ? resetSelection : undefined}
+          tab={panelTab}
+          onTabChange={setPanelTab}
+          radius={radiusControl}
+          sizing={sizingControl}
           scope={{ mode: scope, count: members.length, onChange: setScope, onPreview: setScopePreview }}
           count={elements.length > 1 ? elements.length : undefined}
           pending={ctx.pending}

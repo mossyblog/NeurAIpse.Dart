@@ -7,7 +7,7 @@ import { RotateCcw } from "lucide-react";
 import { colorKey, composite, contrastRatio, formatRatio, parseColor, toHex, wcagRating, type RGBA } from "../core/color.ts";
 import { backgroundBehind, colorProperties, computedColor, resolveColorValue } from "../core/inspect-dom.ts";
 import type { StyleValue } from "../core/style-change.ts";
-import { colorTokens } from "../core/token-catalog.ts";
+import { borderWidthTokens, colorTokens } from "../core/token-catalog.ts";
 import { FIELD_CLASS, SectionLabel, SegmentedControl } from "./chrome.tsx";
 import { GroupOverlay } from "./group-overlay.tsx";
 import { EDIT_NOT_FOUND, type InspectorContext } from "./inspector-context.ts";
@@ -66,6 +66,8 @@ export function ColorInspector({ ctx }: { ctx: InspectorContext }) {
   const { surface, resolver, styles } = ctx;
   const [selection, setSelection] = useState<Selection | null>(null);
   const [draft, setDraft] = useState<{ key: string; value: string; invalid: boolean } | null>(null);
+  const [strokeIndividual, setStrokeIndividual] = useState(false);
+  const [strokeSide, setStrokeSide] = useState<"top" | "right" | "bottom" | "left">("top");
 
   const isOverlay = (el: Element) => el === surface.host || el.getRootNode() === surface.shadow;
   const defaultProperty = (el: Element) => {
@@ -116,6 +118,7 @@ export function ColorInspector({ ctx }: { ctx: InspectorContext }) {
       setSelection(select(el, defaultProperty(el)));
     },
   });
+  useEffect(() => picker.redraw(), [styles.items, picker.redraw]);
   useEffect(() => resolver.subscribe(picker.redraw), [resolver, picker.redraw]);
 
   const onEscape = useEffectEvent(() => {
@@ -229,7 +232,7 @@ export function ColorInspector({ ctx }: { ctx: InspectorContext }) {
       <GroupOverlay kind="color" hover={picker.hover} members={sel?.members ?? []} anchor={sel?.anchor ?? null} badge={sel ? `${sel.members.length} element${sel.members.length === 1 ? "" : "s"}` : undefined} />
       {(sel || ctx.pending.length > 0) && (
         <PanelFrame
-          label="Colour inspector"
+          label="Color inspector"
           kind="color"
           elementName={sel ? memberLabel(sel.anchor) : "Colour"}
           regionLabel={sel ? (PROPERTY_TAB_LABEL[property] ?? property) : "Click an element to pick its colours"}
@@ -428,6 +431,207 @@ export function ColorInspector({ ctx }: { ctx: InspectorContext }) {
                   </div>
                 </div>
               )}
+
+              {property === "border-color" && (() => {
+                const cs = getComputedStyle(sel.anchor);
+                const rootFontPx = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+                const strokeTokens = borderWidthTokens(vars, rootFontPx);
+                const sideWidths = {
+                  top: Math.round((Number.parseFloat(cs.borderTopWidth) || 0) * 100) / 100,
+                  right: Math.round((Number.parseFloat(cs.borderRightWidth) || 0) * 100) / 100,
+                  bottom: Math.round((Number.parseFloat(cs.borderBottomWidth) || 0) * 100) / 100,
+                  left: Math.round((Number.parseFloat(cs.borderLeftWidth) || 0) * 100) / 100,
+                };
+                const allEqual = sideWidths.top === sideWidths.right && sideWidths.top === sideWidths.bottom && sideWidths.top === sideWidths.left;
+                const currentStyle = cs.borderTopStyle || "solid";
+                const strokeProps = ["border-width", "border-top-width", "border-right-width", "border-bottom-width", "border-left-width", "border-style"];
+                const strokeRecords = styles.items.filter(
+                  (a) =>
+                    a.kind === "style-change" &&
+                    a.styleDetail?.groupId === sel.groupId &&
+                    a.styleChange?.property &&
+                    strokeProps.includes(a.styleChange.property),
+                );
+                const applyStrokeWidth = (prop: string, next: StyleValue) => {
+                  const existing = pendingFor(prop)?.styleChange;
+                  const fromVal: StyleValue = existing?.from ?? { value: `${sideWidths.top}px` };
+                  if (prop === "border-width") {
+                    for (const s of ["top", "right", "bottom", "left"] as const) {
+                      const rec = pendingFor(`border-${s}-width`);
+                      if (rec) styles.remove(rec.id);
+                    }
+                  } else {
+                    const uniform = pendingFor("border-width");
+                    if (uniform) styles.remove(uniform.id);
+                  }
+                  styles.upsert({
+                    category: "color",
+                    property: prop,
+                    groupId: sel.groupId,
+                    elements: sel.members,
+                    from: fromVal,
+                    to: next,
+                    detail: { name: memberLabel(sel.anchor) },
+                  });
+                };
+                const applyStrokeStyle = (nextStyle: string) => {
+                  const existing = pendingFor("border-style")?.styleChange;
+                  styles.upsert({
+                    category: "color",
+                    property: "border-style",
+                    groupId: sel.groupId,
+                    elements: sel.members,
+                    from: existing?.from ?? { value: currentStyle },
+                    to: { value: nextStyle },
+                    detail: { name: memberLabel(sel.anchor) },
+                  });
+                };
+                const activeStrokeProp = strokeIndividual ? `border-${strokeSide}-width` : "border-width";
+                const activeStrokePx = strokeIndividual ? sideWidths[strokeSide] : sideWidths.top;
+                const activeStrokeToken = pendingFor(activeStrokeProp)?.styleChange?.to.token;
+
+                const sideIcon = (side: "top" | "right" | "bottom" | "left") => (
+                  <svg viewBox="0 0 12 12" className="size-3 shrink-0" aria-hidden>
+                    <rect x="2" y="2" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" strokeOpacity="0.28" strokeWidth="1" strokeDasharray="1.5 1.5" />
+                    {side === "top" && <line x1="2" y1="2" x2="10" y2="2" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />}
+                    {side === "right" && <line x1="10" y1="2" x2="10" y2="10" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />}
+                    {side === "bottom" && <line x1="2" y1="10" x2="10" y2="10" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />}
+                    {side === "left" && <line x1="2" y1="2" x2="2" y2="10" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />}
+                  </svg>
+                );
+
+                return (
+                  <div className="flex flex-col gap-2 rounded-xl border border-border/50 bg-muted/30 p-2.5" data-annotate-stroke-section="">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-foreground">Stroke</span>
+                      {strokeRecords.length > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          className="h-5 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                          onClick={() => strokeRecords.forEach((r) => styles.remove(r.id))}
+                        >
+                          <RotateCcw className="size-3" />
+                          Reset
+                        </Button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-[1fr_1fr_auto] items-center gap-1.5">
+                      <select
+                        aria-label="Border style"
+                        data-annotate-border-style=""
+                        className="h-7 cursor-pointer rounded-lg border border-border/70 bg-background/85 px-2 text-xs text-foreground outline-none focus:border-ring/60 focus:ring-2 focus:ring-ring/20 dark:bg-background/45"
+                        value={pendingFor("border-style")?.styleChange?.to.value ?? currentStyle}
+                        onChange={(e) => applyStrokeStyle(e.target.value)}
+                      >
+                        <option value="solid">Solid</option>
+                        <option value="dashed">Dashed</option>
+                        <option value="dotted">Dotted</option>
+                        <option value="none">None</option>
+                      </select>
+
+                      <div className="flex h-7 items-center gap-1.5 rounded-lg border border-border/70 bg-background/85 px-2 focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20 dark:bg-background/45">
+                        <span className="text-[10px] font-medium text-muted-foreground">W</span>
+                        <input
+                          aria-label="Border width in px"
+                          data-annotate-border-width=""
+                          inputMode="decimal"
+                          placeholder={allEqual ? undefined : "mix"}
+                          className="h-full w-full min-w-0 bg-transparent font-mono text-xs text-foreground tabular-nums outline-none"
+                          value={allEqual ? String(sideWidths.top) : ""}
+                          onChange={(e) => {
+                            const n = Number(e.target.value.trim());
+                            if (e.target.value.trim() !== "" && Number.isFinite(n) && n >= 0) {
+                              applyStrokeWidth("border-width", { value: `${Math.round(n * 100) / 100}px` });
+                            }
+                          }}
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        aria-label="Individual border sides"
+                        aria-pressed={strokeIndividual}
+                        title="Individual border sides"
+                        data-annotate-stroke-individual=""
+                        onClick={() => setStrokeIndividual((v) => !v)}
+                        className={cn(
+                          "flex size-7 cursor-pointer items-center justify-center rounded-lg border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                          strokeIndividual
+                            ? "border-primary/60 bg-primary/15 text-primary"
+                            : "border-border/60 bg-background/75 text-muted-foreground hover:bg-muted hover:text-foreground dark:bg-background/40",
+                        )}
+                      >
+                        <svg viewBox="0 0 14 14" className="size-3.5" aria-hidden>
+                          <rect x="2.25" y="2.25" width="9.5" height="9.5" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                        </svg>
+                      </button>
+                    </div>
+
+                    {strokeIndividual && (
+                      <div className="grid grid-cols-2 gap-1.5" data-annotate-stroke-sides="">
+                        {(["top", "right", "bottom", "left"] as const).map((side) => {
+                          const focused = strokeSide === side;
+                          return (
+                            <label
+                              key={side}
+                              onClick={() => setStrokeSide(side)}
+                              className={cn(
+                                "flex h-7 cursor-text items-center gap-1.5 rounded-lg border px-2 transition-colors",
+                                focused
+                                  ? "border-primary/50 bg-background/95 ring-1 ring-primary/20 dark:bg-background/60"
+                                  : "border-border/60 bg-background/75 dark:bg-background/40",
+                              )}
+                            >
+                              <span className={cn(focused ? "text-foreground" : "text-muted-foreground")}>{sideIcon(side)}</span>
+                              <input
+                                aria-label={`Border ${side} width`}
+                                data-annotate-border-side={side}
+                                inputMode="decimal"
+                                className="h-full w-full min-w-0 bg-transparent font-mono text-xs text-foreground tabular-nums outline-none"
+                                value={String(sideWidths[side])}
+                                onFocus={() => setStrokeSide(side)}
+                                onChange={(e) => {
+                                  const n = Number(e.target.value.trim());
+                                  if (e.target.value.trim() !== "" && Number.isFinite(n) && n >= 0) {
+                                    applyStrokeWidth(`border-${side}-width`, { value: `${Math.round(n * 100) / 100}px` });
+                                  }
+                                }}
+                              />
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {strokeTokens.length > 0 && (
+                      <div className="grid grid-cols-2 gap-1.5 pt-0.5" data-annotate-stroke-tokens="">
+                        {strokeTokens.map((t) => {
+                          const active = activeStrokeToken ? activeStrokeToken === t.token : Math.abs(activeStrokePx - (t.px ?? 0)) < 0.25;
+                          return (
+                            <Button
+                              key={t.token}
+                              variant={active ? "default" : "outline"}
+                              size="xs"
+                              aria-pressed={active}
+                              title={`${t.token} · ${t.px}px`}
+                              className={cn(
+                                "h-6 min-w-0 justify-between gap-1 rounded-md px-2 font-mono text-[10px] tabular-nums",
+                                !active && "border-border/60 bg-background/70 hover:bg-muted/60 dark:bg-background/35",
+                              )}
+                              onClick={() => applyStrokeWidth(activeStrokeProp, { value: `${t.px ?? 0}px`, token: t.token })}
+                            >
+                              <span className="min-w-0 truncate">{t.token}</span>
+                              <span className={cn("shrink-0", active ? "opacity-75" : "text-muted-foreground")}>{`${t.px ?? 0}px`}</span>
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {showScope && (
                 <div className="flex flex-col gap-1.5">

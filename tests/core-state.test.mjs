@@ -165,7 +165,7 @@ test("single-key shortcuts are gated per spec section 2", () => {
   assert.equal(resolveShortcut(key("x"), state()), "clear");
   assert.equal(resolveShortcut(key("p"), state({ annotationCount: 0 })), "freeze");
   assert.equal(resolveShortcut(key("l"), state({ annotationCount: 0 })), "layout");
-  assert.equal(resolveShortcut(key("h"), state({ annotationCount: 0 })), null);
+  assert.equal(resolveShortcut(key("h"), state({ annotationCount: 0 })), "hide");
   assert.equal(resolveShortcut(key("c"), state({ annotationCount: 0 })), null);
   assert.equal(resolveShortcut(key("x"), state({ annotationCount: 0, placementCount: 1 })), "clear");
   assert.equal(resolveShortcut(key("s"), state()), null);

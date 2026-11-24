@@ -334,6 +334,7 @@ export function TypeInspector({ ctx }: { ctx: InspectorContext }) {
     },
   });
 
+  useEffect(() => picker.redraw(), [styles.items, picker.redraw]);
   useEffect(() => resolver.subscribe(picker.redraw), [resolver, picker.redraw]);
 
   const onEscape = useEffectEvent(() => {
@@ -542,10 +543,12 @@ export function TypeInspector({ ctx }: { ctx: InspectorContext }) {
                   const res = resolver.resolve(sel.anchor, p);
                   const computed = getComputedStyle(sel.anchor).getPropertyValue(p).trim();
                   const tokens = tokenList(p);
-                  const shownValue = pending && !pending.to.token ? pending.to.value : computed;
+                  const shownValue = pending ? pending.to.value : computed;
                   const parts =
                     shownValue === "normal"
-                      ? { n: String(normalLineHeightPx(sel.anchor)), unit: "px" }
+                      ? p === "line-height"
+                        ? { n: String(normalLineHeightPx(sel.anchor)), unit: "px" }
+                        : { n: "0", unit: "px" }
                       : splitNumber(shownValue);
                   const status: TokenStatus = res.status;
                   const currentToken = status === "token" ? (res.token ? res.token : undefined) : undefined;

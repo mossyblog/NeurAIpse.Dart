@@ -1,6 +1,32 @@
+import { useEffect, useState } from "react";
 import { cn } from "cn";
 import type { Rect } from "../core/types.ts";
 import { PILL_CLASS } from "./chrome.tsx";
+
+function useElementGeometry(anchor: Element | null, members: readonly Element[] = []) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return;
+    const unique = Array.from(new Set([anchor, ...members].filter((el): el is Element => Boolean(el?.isConnected))));
+    if (!unique.length) return;
+    let frame = 0;
+    let primed = false;
+    const schedule = () => {
+      if (!primed) {
+        primed = true;
+        return;
+      }
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setTick((t) => t + 1));
+    };
+    const ro = new ResizeObserver(schedule);
+    for (const el of unique) ro.observe(el);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+    };
+  }, [anchor, members]);
+}
 
 const ACCENT = "var(--annotate-marker-purple)";
 const HOVER = "var(--annotate-marker-blue)";
@@ -20,6 +46,7 @@ const BADGE_H = 18;
 const BADGE_GAP = 4;
 
 export function GroupOverlay({ hover, members, anchor, badge, kind }: { hover: Element | null; members: readonly Element[]; anchor: Element | null; badge?: string; kind: "type" | "color" | "spacing" }) {
+  useElementGeometry(anchor, members);
   const anchorRect = anchor?.isConnected ? rectOf(anchor) : null;
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
@@ -95,6 +122,7 @@ const LADDER_OVERFLOW = 24;
  * line box). Current value solid, nearest other token labelled. Never hit-testable.
  */
 export function TypeLadder({ anchor, columns }: { anchor: Element | null; columns: readonly TypeLadderColumn[] }) {
+  useElementGeometry(anchor);
   if (!anchor?.isConnected) return null;
   const r = rectOf(anchor);
   const limit = window.innerHeight + LADDER_OVERFLOW;

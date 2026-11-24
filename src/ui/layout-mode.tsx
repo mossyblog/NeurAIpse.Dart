@@ -21,7 +21,11 @@ import {
   type PlacementAnnotation,
   type ResizeHandle,
 } from "../core/layout-placement.ts";
+import { applyResizeSnap, resizeSnapLines, snapRect } from "../core/rearrange-geometry.ts";
+import { unionRect } from "../core/select.ts";
 import { isEditableElement } from "../core/shortcuts.ts";
+import { spacingTokens } from "../core/style-change.ts";
+import { readRootVars } from "../core/tokens-dom.ts";
 import type { Annotation, Point, Rect } from "../core/types.ts";
 import { FIELD_CLASS, PILL_CLASS, SURFACE_CLASS, ToolbarDivider } from "./chrome.tsx";
 import { LayoutPalette } from "./layout-palette.tsx";
@@ -105,6 +109,14 @@ function TextEditor({ initial, onDone }: { initial: string; onDone: (value: stri
  * `kind: "placement"` annotations. Placements live in document px (a page layer shifted
  * by the scroll, like markers) and stay visible as numbered outlines outside the mode.
  */
+const readGridSnapping = (): { gridStep: number; gapSteps: number[] } => {
+  const rootFontPx = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  const tokens = spacingTokens(readRootVars(document), rootFontPx);
+  const gapSteps = Array.from(new Set(tokens.map((t) => Math.round(t.px)).filter((px) => px > 0))).sort((a, b) => a - b);
+  const base = gapSteps.find((px) => px >= 4 && px <= 16);
+  return { gridStep: base ?? 8, gapSteps };
+};
+
 export function LayoutMode(props: LayoutModeProps) {
   const { placements, interactive, showChrome = true, surface, attributeNames, apply } = props;
   const [armed, setArmed] = useState<PaletteItem | null>(null);
@@ -149,8 +161,16 @@ export function LayoutMode(props: LayoutModeProps) {
     return identifyElement(el ?? document.body, attributeNames);
   };
 
-  const drop = (item: PaletteItem, client: Point) => {
-    const rect = rectAround({ x: client.x + window.scrollX, y: client.y + window.scrollY }, item);
+  const otherPlacementRects = (excludeIds: readonly string[]): Rect[] =>
+    placements.filter((p) => !excludeIds.includes(p.id)).map((p) => placementRect(p, window.innerWidth));
+
+  const drop = (item: PaletteItem, client: Point, bypassSnap = false) => {
+    let rect = rectAround({ x: client.x + window.scrollX, y: client.y + window.scrollY }, item);
+    if (!bypassSnap) {
+      const { gridStep, gapSteps } = readGridSnapping();
+      const snap = snapRect(rect, otherPlacementRects([]), { gridStep, gapSteps });
+      rect = moveRect(rect, snap.dx, snap.dy);
+    }
     const placement = createPlacement({
       id: createId(),
       componentType: item.type,
@@ -226,11 +246,32 @@ export function LayoutMode(props: LayoutModeProps) {
 
   const rectFor = (p: PlacementAnnotation) => draft?.[p.id] ?? placementRect(p, viewportWidth);
 
-  const draftFrom = (g: Gesture, point: Point): Record<string, Rect> | null => {
-    const dx = point.x - g.start.x;
-    const dy = point.y - g.start.y;
-    if (g.kind === "move") return Object.fromEntries(Object.entries(g.origin).map(([id, r]) => [id, moveRect(r, dx, dy)]));
-    if (g.kind === "resize") return { [g.id]: resizeRect(g.origin, g.handle, dx, dy) };
+  const draftFrom = (g: Gesture, point: Point, bypassSnap = false): Record<string, Rect> | null => {
+    let dx = point.x - g.start.x;
+    let dy = point.y - g.start.y;
+    if (g.kind === "move") {
+      const ids = Object.keys(g.origin);
+      const movedRects = Object.values(g.origin).map((r) => moveRect(r, dx, dy));
+      if (!bypassSnap && movedRects.length > 0) {
+        const union = unionRect(movedRects);
+        if (union) {
+          const { gridStep, gapSteps } = readGridSnapping();
+          const snap = snapRect(union, otherPlacementRects(ids), { gridStep, gapSteps });
+          dx += snap.dx;
+          dy += snap.dy;
+        }
+      }
+      return Object.fromEntries(Object.entries(g.origin).map(([id, r]) => [id, moveRect(r, dx, dy)]));
+    }
+    if (g.kind === "resize") {
+      let next = resizeRect(g.origin, g.handle, dx, dy);
+      if (!bypassSnap) {
+        const { gridStep, gapSteps } = readGridSnapping();
+        const snap = snapRect(next, otherPlacementRects([g.id]), { lines: resizeSnapLines(g.handle), gridStep, gapSteps });
+        next = applyResizeSnap(next, g.handle, snap.dx, snap.dy);
+      }
+      return { [g.id]: next };
+    }
     return null;
   };
 
@@ -250,7 +291,7 @@ export function LayoutMode(props: LayoutModeProps) {
       setGhost(ghostAt);
       return;
     }
-    setDraft(draftFrom(g, point));
+    setDraft(draftFrom(g, point, event.altKey));
   });
 
   const onWindowUp = useEffectEvent((event: PointerEvent) => {
@@ -267,13 +308,13 @@ export function LayoutMode(props: LayoutModeProps) {
         setArmed(null);
         setGhost(null);
       } else {
-        drop(g.item, point);
+        drop(g.item, point, event.altKey);
       }
       return;
     }
     setDraft(null);
     if (!g.moved) return;
-    const rects = draftFrom(g, point);
+    const rects = draftFrom(g, point, event.altKey);
     if (rects) commitRects(rects);
   });
 
