@@ -60,6 +60,21 @@ test("settings defaults match spec section 4", () => {
     inspectorHandles: false,
     inspectorGuides: false,
     dockSide: "right",
+    gooeyNav: {
+      enabled: true,
+      preset: "classic",
+      color: "",
+      colors: [],
+      size: "md",
+      frame: true,
+      hoverEffect: true,
+      animationTime: 600,
+      particleCount: 15,
+      spread: 56,
+      timeVariance: 300,
+      gooeyness: 0.5,
+      wobble: 0.5,
+    },
   });
   assert.ok(Object.isFrozen(DEFAULT_SETTINGS));
 });

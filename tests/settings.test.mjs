@@ -1,17 +1,20 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
+  DEFAULT_GOOEY_NAV_SETTINGS,
   DEFAULT_SETTINGS,
   MARKER_COLOR_IDS,
   SETTINGS_KEY,
   THEME_KEY,
   activeWebhookUrl,
+  applyGooeyNavPreset,
   buildCopyText,
   generateOutput,
   isValidWebhookUrl,
   loadSettings,
   loadTheme,
   nextTheme,
+  normalizeGooeyNavSettings,
   normalizeSettings,
   outputDetailLevel,
   saveSettings,
@@ -92,11 +95,67 @@ test("every settings field round-trips through feedback-toolbar-settings", () =>
     inspectorHandles: true,
     inspectorGuides: true,
     dockSide: "left",
+    gooeyNav: {
+      enabled: false,
+      preset: "custom",
+      color: "#ff5a1f",
+      colors: ["#ff5a1f", "#ffb020"],
+      size: "lg",
+      frame: false,
+      hoverEffect: false,
+      animationTime: 850,
+      particleCount: 22,
+      spread: 72,
+      timeVariance: 400,
+      gooeyness: 0.75,
+      wobble: 0.35,
+    },
   };
   saveSettings(settings, storage);
   assert.deepEqual(JSON.parse(storage.data.get(SETTINGS_KEY)), settings);
   assert.deepEqual(loadSettings(storage), settings);
   assert.deepEqual(loadSettings(memoryStorage()), DEFAULT_SETTINGS);
+});
+
+test("GooeyNav presets and normalization enforce React Bits bounds and hex colors", () => {
+  const accent = applyGooeyNavPreset(DEFAULT_GOOEY_NAV_SETTINGS, "accent");
+  assert.equal(accent.preset, "accent");
+  assert.equal(accent.color, "#ff5a1f");
+  assert.deepEqual(accent.colors, ["#ff5a1f", "#ff8a3a", "#ffb020"]);
+
+  const splash = applyGooeyNavPreset(accent, "splash");
+  assert.equal(splash.preset, "splash");
+  assert.equal(splash.particleCount, 24);
+  assert.equal(splash.spread, 84);
+  assert.equal(splash.gooeyness, 0.65);
+
+  const calm = applyGooeyNavPreset(splash, "calm");
+  assert.equal(calm.particleCount, 8);
+  assert.equal(calm.spread, 28);
+  assert.equal(calm.wobble, 0.2);
+
+  const clamped = normalizeGooeyNavSettings({
+    preset: "bogus",
+    size: "xl",
+    color: "not-hex",
+    colors: ["#abc", "bad", "#112233"],
+    particleCount: 99,
+    spread: -5,
+    animationTime: 5000,
+    timeVariance: 2000,
+    gooeyness: 2,
+    wobble: -1,
+  });
+  assert.equal(clamped.preset, "classic");
+  assert.equal(clamped.size, "md");
+  assert.equal(clamped.color, "");
+  assert.deepEqual(clamped.colors, ["#abc", "#112233"]);
+  assert.equal(clamped.particleCount, 32);
+  assert.equal(clamped.spread, 0);
+  assert.equal(clamped.animationTime, 1500);
+  assert.equal(clamped.timeVariance, 1000);
+  assert.equal(clamped.gooeyness, 1);
+  assert.equal(clamped.wobble, 0);
 });
 
 test("theme toggles and persists at feedback-toolbar-theme", () => {

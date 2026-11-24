@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode, type Ref } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode, type Ref } from "react";
 import {
   Kbd,
   Toolbar as ToolbarPrimitive,
@@ -8,6 +8,7 @@ import { cn } from "cn";
 import {
   DOCK_BASE_SIZE,
   DOCK_INFLUENCE_RADIUS,
+  DOCK_MAX_SIZE,
   DOCK_RENDER_SIZE,
   DOCK_SLOT_PITCH,
   computeDockOffsets,
@@ -15,9 +16,16 @@ import {
   dockMetricsForFactor,
 } from "../core/dock.ts";
 import { SEND_LABELS, type SendState } from "../core/send.ts";
+import { DEFAULT_GOOEY_NAV_SETTINGS } from "../core/settings.ts";
 import type { InspectorSubMode } from "../core/spacing-modes.ts";
 import type { SyncStatus } from "../core/sync.ts";
-import type { DockSide } from "../core/types.ts";
+import type { DockSide, GooeyNavSettings, GooeyNavSize, Theme } from "../core/types.ts";
+import {
+  contrastInkForColor,
+  createGooeyNavEngine,
+  type GooeyEngineHandle,
+  type GooeyRect,
+} from "./gooey-nav-engine.ts";
 import {
   Check,
   CircleAlert,
@@ -53,12 +61,23 @@ import type { DragPointerHandlers } from "./use-drag-position.ts";
 
 type ToolMode = "annotate" | "spacing" | "type" | "color" | "layout" | "rearrange";
 
+const MODE_ORDER: readonly ToolMode[] = ["annotate", "spacing", "type", "color", "layout", "rearrange"];
+const GOOEY_PILLS: Record<Theme, { color: string; hover: string; shadow: number }> = {
+  dark: { color: "#f4f4f5", hover: "rgba(255, 255, 255, 0.08)", shadow: 0.4 },
+  light: { color: "#27272a", hover: "rgba(24, 24, 27, 0.06)", shadow: 0.2 },
+};
+
+const NOTCH_SIZES: Record<GooeyNavSize, { baseSize: number; maxSize: number; slotPitch: number }> = {
+  sm: { baseSize: 22, maxSize: 38, slotPitch: 26 },
+  md: { baseSize: DOCK_BASE_SIZE, maxSize: DOCK_MAX_SIZE, slotPitch: DOCK_SLOT_PITCH },
+  lg: { baseSize: 28, maxSize: 48, slotPitch: 32 },
+};
+
 const TOTAL_DOCK_ITEMS = 14;
-const REST_SCALE = Number((DOCK_BASE_SIZE / DOCK_RENDER_SIZE).toFixed(4));
 const SPRING_RATE = 24;
 
-function syntheticOffset(index: number): number {
-  return (index - (TOTAL_DOCK_ITEMS - 1) / 2) * DOCK_SLOT_PITCH;
+function syntheticOffset(index: number, slotPitch = DOCK_SLOT_PITCH): number {
+  return (index - (TOTAL_DOCK_ITEMS - 1) / 2) * slotPitch;
 }
 
 function prefersReducedMotion(): boolean {
@@ -68,6 +87,12 @@ function prefersReducedMotion(): boolean {
 type DockButtonProps = {
   index: number;
   side: DockSide;
+  slotPitch: number;
+  restScale: number;
+  gooeyCanvasActive?: boolean;
+  gooeyHoverActive?: boolean;
+  activePillColor?: string;
+  activeIconInk?: string;
   showTooltip: boolean;
   registerSlot: (index: number, el: HTMLElement | null) => void;
   registerButton: (index: number, el: HTMLElement | null) => void;
@@ -90,6 +115,12 @@ type DockButtonProps = {
 function NotchDockButton({
   index,
   side,
+  slotPitch,
+  restScale,
+  gooeyCanvasActive,
+  gooeyHoverActive,
+  activePillColor,
+  activeIconInk,
   showTooltip,
   registerSlot,
   registerButton,
@@ -112,8 +143,12 @@ function NotchDockButton({
   const activeStyle =
     tone === "mode"
       ? pressed
-        ? "bg-background text-foreground shadow-2xs ring-1 ring-foreground/10 hover:bg-background dark:bg-foreground/15 dark:ring-white/15"
-        : "text-muted-foreground hover:bg-background/60 hover:text-foreground dark:hover:bg-foreground/10"
+        ? gooeyCanvasActive
+          ? "bg-transparent hover:bg-transparent"
+          : "shadow-sm"
+        : gooeyHoverActive
+          ? "text-muted-foreground hover:text-foreground"
+          : "text-muted-foreground hover:bg-background/60 hover:text-foreground dark:hover:bg-foreground/10"
       : tone === "warning" && pressed
         ? "bg-[var(--annotate-warning-soft)] text-[var(--annotate-warning)] ring-1 ring-[var(--annotate-warning)]/30 hover:bg-[var(--annotate-warning-soft)]"
         : tone === "success"
@@ -127,7 +162,7 @@ function NotchDockButton({
   return (
     <div
       ref={(el) => registerSlot(index, el)}
-      style={{ width: `${DOCK_SLOT_PITCH}px`, height: `${DOCK_SLOT_PITCH}px` }}
+      style={{ width: `${slotPitch}px`, height: `${slotPitch}px` }}
       className="relative flex shrink-0 items-center justify-center"
       onPointerEnter={() => onHoverItem(index)}
     >
@@ -149,10 +184,17 @@ function NotchDockButton({
         style={{
           width: `${DOCK_RENDER_SIZE}px`,
           height: `${DOCK_RENDER_SIZE}px`,
-          transform: `translate3d(0px, 0px, 0) scale(${REST_SCALE})`,
+          transform: `translate3d(0px, 0px, 0) scale(${restScale})`,
+          ...(tone === "mode" && pressed
+            ? {
+                color: activeIconInk,
+                ...(gooeyCanvasActive ? {} : { backgroundColor: activePillColor }),
+              }
+            : {}),
         }}
         className={cn(
-          "annotate-notch-item relative shrink-0 rounded-xl p-0 active:translate-y-0",
+          "annotate-notch-item relative shrink-0 p-0 active:translate-y-0",
+          tone === "mode" ? "rounded-full" : "rounded-xl",
           activeStyle,
           className,
         )}
@@ -230,8 +272,12 @@ export type ToolbarProps = {
   onExit: () => void;
   /** Pointer-only drag handlers for sliding the notch vertically or across to the other edge. */
   dragHandlers?: DragPointerHandlers;
+  /** Active theme for WebGL2 GooeyNav pill colour. */
+  theme?: Theme;
   /** Which viewport edge the side notch is docked to. */
   dockSide?: DockSide;
+  /** Gooey selection animation settings for the mode bar. */
+  gooeyNav?: GooeyNavSettings;
   /** Flip the notch to the opposite viewport edge. */
   onToggleDockSide?: () => void;
   /** Vertical center coordinate (px) for the edge-docked notch. */
@@ -307,6 +353,20 @@ function InspectorAids(props: Pick<ToolbarProps, "handles" | "guides" | "onToggl
 export function Toolbar(props: ToolbarProps) {
   const mode = props.mode ?? "annotate";
   const side: DockSide = props.dockSide ?? "right";
+  const theme: Theme = props.theme ?? "dark";
+  const gooey: GooeyNavSettings = props.gooeyNav ?? DEFAULT_GOOEY_NAV_SETTINGS;
+  const sizeConfig = NOTCH_SIZES[gooey.size] ?? NOTCH_SIZES.md;
+  const sizeConfigRef = useRef(sizeConfig);
+  sizeConfigRef.current = sizeConfig;
+  const restScale = Number((sizeConfig.baseSize / DOCK_RENDER_SIZE).toFixed(4));
+  const effectivePillColor = gooey.color || GOOEY_PILLS[theme].color;
+  const activeIconInk = contrastInkForColor(effectivePillColor);
+  const gooeyCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const gooeyEngineRef = useRef<GooeyEngineHandle | null>(null);
+  const [gooeyWebGL, setGooeyWebGL] = useState(false);
+  const activeModeIndex = Math.max(0, MODE_ORDER.indexOf(mode));
+  const activeModeIndexRef = useRef(activeModeIndex);
+  activeModeIndexRef.current = activeModeIndex;
   const isRight = side === "right";
   const centerY = props.centerY ?? (typeof window === "undefined" ? 360 : Math.round(window.innerHeight / 2));
   const empty = props.annotationCount === 0;
@@ -327,6 +387,9 @@ export function Toolbar(props: ToolbarProps) {
 
   // GPU-composited macOS Dock hover magnification (zero React re-renders during pointermove).
   const notchElRef = useRef<HTMLDivElement | null>(null);
+  const gripElRef = useRef<HTMLButtonElement | null>(null);
+  const divider1ElRef = useRef<HTMLDivElement | null>(null);
+  const divider2ElRef = useRef<HTMLDivElement | null>(null);
   const slotElsRef = useRef<(HTMLElement | null)[]>([]);
   const buttonElsRef = useRef<(HTMLElement | null)[]>([]);
   const restingOffsetsRef = useRef<number[]>([]);
@@ -366,21 +429,62 @@ export function Toolbar(props: ToolbarProps) {
     buttonElsRef.current[index] = el;
   }, []);
 
+  const computeModeRects = useCallback((factors: readonly number[], offsetsY: readonly number[]): GooeyRect[] => {
+    const cfg = sizeConfigRef.current;
+    const rects: GooeyRect[] = [];
+    for (let i = 0; i < MODE_ORDER.length; i++) {
+      const metrics = dockMetricsForFactor(factors[i] ?? 0, {
+        baseSize: cfg.baseSize,
+        maxSize: cfg.maxSize,
+      });
+      const size = metrics.buttonSize;
+      const cx = cfg.slotPitch / 2;
+      const cy = i * cfg.slotPitch + cfg.slotPitch / 2 + (offsetsY[i] ?? 0);
+      rects.push({ x: cx - size / 2, y: cy - size / 2, w: size, h: size });
+    }
+    return rects;
+  }, []);
+
   /** Writes GPU-only translate3d + scale directly to button DOM nodes (zero layout reflow). */
   const applyFactorsToDom = useCallback((factors: readonly number[], pivot: number | null) => {
-    const offsetsY = computeDockOffsets(factors, pivot);
-    const dir = sideRef.current === "right" ? -1 : 1;
+    const cfg = sizeConfigRef.current;
+    const offsetsY = computeDockOffsets(factors, pivot, {
+      baseSize: cfg.baseSize,
+      maxSize: cfg.maxSize,
+      slotPitch: cfg.slotPitch,
+    });
     for (let i = 0; i < TOTAL_DOCK_ITEMS; i++) {
       const btn = buttonElsRef.current[i];
       if (!btn) continue;
-      const metrics = dockMetricsForFactor(factors[i] ?? 0);
-      const shiftX = Number((dir * metrics.protrusion).toFixed(2));
+      const metrics = dockMetricsForFactor(factors[i] ?? 0, {
+        baseSize: cfg.baseSize,
+        maxSize: cfg.maxSize,
+      });
       const shiftY = offsetsY[i] ?? 0;
-      btn.style.transform = `translate3d(${shiftX}px, ${shiftY}px, 0) scale(${metrics.scale})`;
-      btn.style.zIndex = metrics.factor > 0.5 ? "2" : metrics.factor > 0.05 ? "1" : "";
+      // Keep every icon dead-center in its vertical lane (shiftX = 0).
+      btn.style.transform = `translate3d(0px, ${shiftY}px, 0) scale(${metrics.scale})`;
+      btn.style.zIndex = metrics.factor > 0.5 ? "3" : metrics.factor > 0.05 ? "2" : "1";
       btn.setAttribute("data-dock-factor", metrics.factor.toFixed(2));
     }
-  }, []);
+    gooeyEngineRef.current?.syncRects(
+      cfg.slotPitch,
+      MODE_ORDER.length * cfg.slotPitch,
+      computeModeRects(factors, offsetsY),
+    );
+    // Glide the grip and section dividers with the dock wave so icons never collide with them.
+    if (gripElRef.current) {
+      const topShift = Math.min(0, offsetsY[0] ?? 0);
+      gripElRef.current.style.transform = `translate3d(0px, ${topShift}px, 0)`;
+    }
+    if (divider1ElRef.current) {
+      const mid1 = Number((((offsetsY[5] ?? 0) + (offsetsY[6] ?? 0)) / 2).toFixed(2));
+      divider1ElRef.current.style.transform = `translate3d(0px, ${mid1}px, 0)`;
+    }
+    if (divider2ElRef.current) {
+      const mid2 = Number((((offsetsY[10] ?? 0) + (offsetsY[11] ?? 0)) / 2).toFixed(2));
+      divider2ElRef.current.style.transform = `translate3d(0px, ${mid2}px, 0)`;
+    }
+  }, [computeModeRects]);
 
   const stopLoop = useCallback(() => {
     if (rafIdRef.current !== null) {
@@ -424,8 +528,9 @@ export function Toolbar(props: ToolbarProps) {
     (relY: number | null, pivot: number | null, immediate = false) => {
       pivotIndexRef.current = pivot;
       const target = targetFactorsRef.current;
+      const pitch = sizeConfigRef.current.slotPitch;
       for (let i = 0; i < TOTAL_DOCK_ITEMS; i++) {
-        const resting = restingOffsetsRef.current[i] ?? syntheticOffset(i);
+        const resting = restingOffsetsRef.current[i] ?? syntheticOffset(i, pitch);
         target[i] = relY === null ? 0 : dockMagnification(relY - resting, DOCK_INFLUENCE_RADIUS);
       }
       if (immediate || prefersReducedMotion()) {
@@ -440,6 +545,48 @@ export function Toolbar(props: ToolbarProps) {
   );
 
   useEffect(() => () => stopLoop(), [stopLoop]);
+
+  // Mount the ported React Bits WebGL2 SDF GooeyNav engine on the mode group canvas.
+  useLayoutEffect(() => {
+    const canvas = gooeyCanvasRef.current;
+    if (!canvas) return;
+    const palette = GOOEY_PILLS[theme];
+    const pillColor = gooey.color || palette.color;
+    const engine = createGooeyNavEngine(canvas, gooey, pillColor, palette.hover, palette.shadow);
+    gooeyEngineRef.current = engine;
+    setGooeyWebGL(engine.hasWebGL);
+    const restingOffsets = new Array<number>(TOTAL_DOCK_ITEMS).fill(0);
+    const cfg = sizeConfigRef.current;
+    engine.syncRects(
+      cfg.slotPitch,
+      MODE_ORDER.length * cfg.slotPitch,
+      computeModeRects(currentFactorsRef.current, restingOffsets),
+    );
+    engine.go(activeModeIndexRef.current, false);
+    return () => {
+      engine.dispose();
+      gooeyEngineRef.current = null;
+    };
+  }, [computeModeRects]);
+
+  useEffect(() => {
+    const palette = GOOEY_PILLS[theme];
+    const pillColor = gooey.color || palette.color;
+    gooeyEngineRef.current?.updateSettings(gooey, pillColor, palette.hover, palette.shadow);
+  }, [gooey, theme]);
+
+  useEffect(() => {
+    applyFactorsToDom(currentFactorsRef.current, pivotIndexRef.current);
+  }, [gooey.size, applyFactorsToDom]);
+
+  useEffect(() => {
+    gooeyEngineRef.current?.go(activeModeIndex, true);
+  }, [activeModeIndex]);
+
+  useEffect(() => {
+    const modeHover = hoveredIndex !== null && hoveredIndex < MODE_ORDER.length ? hoveredIndex : -1;
+    gooeyEngineRef.current?.setHover(modeHover);
+  }, [hoveredIndex]);
 
   // Reset magnification cleanly when dragging starts.
   useEffect(() => {
@@ -458,9 +605,10 @@ export function Toolbar(props: ToolbarProps) {
     const notch = notchElRef.current;
     if (!notch) return false;
     const notchRect = notch.getBoundingClientRect();
+    const pitch = sizeConfigRef.current.slotPitch;
     if (notchRect.height <= 0) {
       notchCenterYRef.current = null;
-      restingOffsetsRef.current = Array.from({ length: TOTAL_DOCK_ITEMS }, (_, i) => syntheticOffset(i));
+      restingOffsetsRef.current = Array.from({ length: TOTAL_DOCK_ITEMS }, (_, i) => syntheticOffset(i, pitch));
       return false;
     }
     const notchCenter = notchRect.top + notchRect.height / 2;
@@ -469,11 +617,11 @@ export function Toolbar(props: ToolbarProps) {
     for (let i = 0; i < TOTAL_DOCK_ITEMS; i++) {
       const el = slotElsRef.current[i];
       if (!el) {
-        offsets[i] = syntheticOffset(i);
+        offsets[i] = syntheticOffset(i, pitch);
         continue;
       }
       const rect = el.getBoundingClientRect();
-      offsets[i] = rect.height > 0 ? rect.top + rect.height / 2 - notchCenter : syntheticOffset(i);
+      offsets[i] = rect.height > 0 ? rect.top + rect.height / 2 - notchCenter : syntheticOffset(i, pitch);
     }
     restingOffsetsRef.current = offsets;
     return true;
@@ -482,22 +630,23 @@ export function Toolbar(props: ToolbarProps) {
   /** Computes continuous floating-point pivot index from pointerRelY for silky wave gliding. */
   const resolvePivot = (relY: number): { pivot: number; nearest: number; dist: number } => {
     const offsets = restingOffsetsRef.current;
+    const pitch = sizeConfigRef.current.slotPitch;
     let nearest = 0;
     let bestDist = Infinity;
     for (let i = 0; i < TOTAL_DOCK_ITEMS; i++) {
-      const dist = Math.abs(relY - (offsets[i] ?? syntheticOffset(i)));
+      const dist = Math.abs(relY - (offsets[i] ?? syntheticOffset(i, pitch)));
       if (dist < bestDist) {
         bestDist = dist;
         nearest = i;
       }
     }
     let pivot = nearest;
-    const cur = offsets[nearest] ?? syntheticOffset(nearest);
+    const cur = offsets[nearest] ?? syntheticOffset(nearest, pitch);
     if (relY > cur && nearest < TOTAL_DOCK_ITEMS - 1) {
-      const next = offsets[nearest + 1] ?? syntheticOffset(nearest + 1);
+      const next = offsets[nearest + 1] ?? syntheticOffset(nearest + 1, pitch);
       if (next > cur) pivot = nearest + Math.min(1, (relY - cur) / (next - cur));
     } else if (relY < cur && nearest > 0) {
-      const prev = offsets[nearest - 1] ?? syntheticOffset(nearest - 1);
+      const prev = offsets[nearest - 1] ?? syntheticOffset(nearest - 1, pitch);
       if (cur > prev) pivot = nearest - Math.min(1, (cur - relY) / (cur - prev));
     }
     return { pivot, nearest, dist: bestDist };
@@ -552,7 +701,7 @@ export function Toolbar(props: ToolbarProps) {
       const hasLayout = captureGeometry();
       if (!hasLayout) {
         // Synthetic / JSDOM environment without layout boxes: apply wave immediately.
-        setTargets(syntheticOffset(index), index, true);
+        setTargets(syntheticOffset(index, sizeConfigRef.current.slotPitch), index, true);
       }
     }
   };
@@ -561,7 +710,7 @@ export function Toolbar(props: ToolbarProps) {
     setFocusedIndex(index);
     if (pointerRelYRef.current === null) {
       const hasLayout = captureGeometry();
-      const offset = restingOffsetsRef.current[index] ?? syntheticOffset(index);
+      const offset = restingOffsetsRef.current[index] ?? syntheticOffset(index, sizeConfigRef.current.slotPitch);
       setTargets(offset, index, !hasLayout);
     }
   };
@@ -579,6 +728,12 @@ export function Toolbar(props: ToolbarProps) {
   const sharedDockProps = (index: number) => ({
     index,
     side,
+    slotPitch: sizeConfig.slotPitch,
+    restScale,
+    gooeyCanvasActive: gooey.enabled && gooeyWebGL,
+    gooeyHoverActive: gooey.enabled && gooeyWebGL && gooey.hoverEffect,
+    activePillColor: effectivePillColor,
+    activeIconInk,
     showTooltip: activeTooltipIndex === index,
     registerSlot,
     registerButton,
@@ -599,6 +754,8 @@ export function Toolbar(props: ToolbarProps) {
         ref={setNotchRef}
         data-annotate-notch="toolbar"
         data-dock-side={side}
+        data-gooey-frame={String(gooey.frame)}
+        data-gooey-size={gooey.size}
         data-dock-hovered={dockHovered && !props.dragging ? "true" : undefined}
         style={{
           top: centerY,
@@ -611,7 +768,9 @@ export function Toolbar(props: ToolbarProps) {
         onPointerLeave={handleDockPointerLeave}
         className={cn(
           "pointer-events-auto fixed z-30 flex flex-col items-center gap-1 overflow-visible border-y border-solid py-5",
-          "bg-[var(--annotate-notch-bg)] text-popover-foreground border-[var(--annotate-notch-border)] shadow-[var(--annotate-notch-shadow)]",
+          gooey.frame
+            ? "bg-[var(--annotate-notch-bg)] text-popover-foreground border-[var(--annotate-notch-border)] shadow-[var(--annotate-notch-shadow)]"
+            : "bg-transparent text-popover-foreground border-transparent shadow-none",
           "transition-[padding] duration-150 ease-out motion-reduce:transition-none",
           isRight ? "right-0 rounded-l-[18px]" : "left-0 rounded-r-[18px]",
           dockHovered && !props.dragging
@@ -621,17 +780,22 @@ export function Toolbar(props: ToolbarProps) {
             : "px-2",
         )}
       >
-        <NotchFillet side={side} position="top" />
-        <NotchFillet side={side} position="bottom" />
+        {gooey.frame && (
+          <>
+            <NotchFillet side={side} position="top" />
+            <NotchFillet side={side} position="bottom" />
+          </>
+        )}
 
         {props.dragHandlers && (
           <button
+            ref={gripElRef}
             type="button"
             aria-label="Move toolbar"
             title="Drag vertically to reposition · Drag across screen to switch side"
             data-annotate-toolbar-grip=""
             className={cn(
-              "mb-0.5 flex h-4 w-6 shrink-0 touch-none items-center justify-center rounded-md text-muted-foreground/55 transition-colors outline-none hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40",
+              "mb-1.5 flex h-4 w-6 shrink-0 touch-none items-center justify-center rounded-md text-muted-foreground/55 transition-colors outline-none hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40",
               props.dragging ? "cursor-grabbing" : "cursor-grab active:cursor-grabbing",
             )}
             {...props.dragHandlers}
@@ -640,12 +804,21 @@ export function Toolbar(props: ToolbarProps) {
           </button>
         )}
 
-        {/* Mode selection group */}
+        {/* Mode selection group with ported React Bits WebGL2 GooeyNav */}
         <div
           role="group"
           aria-label="Tool modes"
-          className="flex flex-col items-center rounded-xl bg-muted/65 p-0.5 ring-1 ring-inset ring-foreground/[0.06] dark:ring-white/[0.08]"
+          data-gooey-nav=""
+          data-gooey-enabled={String(gooey.enabled)}
+          data-gooey-active={mode}
+          className="relative isolate flex flex-col items-center"
         >
+          <canvas
+            ref={gooeyCanvasRef}
+            aria-hidden
+            data-gooey-canvas=""
+            className="pointer-events-none absolute top-0 left-0 z-0"
+          />
           <NotchDockButton
             {...sharedDockProps(0)}
             tone="mode"
@@ -707,7 +880,9 @@ export function Toolbar(props: ToolbarProps) {
           </NotchDockButton>
         </div>
 
-        <ToolbarDivider orientation="horizontal" />
+        <div ref={divider1ElRef} className="flex w-full justify-center py-0.5">
+          <ToolbarDivider orientation="horizontal" />
+        </div>
 
         {/* Canvas & output actions */}
         <div className="flex flex-col items-center">
@@ -772,9 +947,9 @@ export function Toolbar(props: ToolbarProps) {
           </NotchDockButton>
         </div>
 
-        <ToolbarDivider orientation="horizontal" />
-
-        {/* Side switch, settings & exit */}
+        <div ref={divider2ElRef} className="flex w-full justify-center py-0.5">
+          <ToolbarDivider orientation="horizontal" />
+        </div>
         <div className="flex flex-col items-center">
           <NotchDockButton
             {...sharedDockProps(11)}

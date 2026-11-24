@@ -764,6 +764,7 @@ export function Annotate({
       <SettingsPanel
         settings={settings}
         theme={theme}
+        dockSide={dockSide}
         endpoint={props.endpoint}
         syncStatus={sync.status}
         sessionId={sync.sessionId}
@@ -912,7 +913,9 @@ export function Annotate({
             onToggleSettings={() => setSettingsOpen((open) => !open)}
             onExit={deactivate}
             dragHandlers={dragHandlers}
+            theme={theme}
             dockSide={dockSide}
+            gooeyNav={settings.gooeyNav}
             onToggleDockSide={toggleDockSide}
             centerY={notchCenterY}
             dragging={notchDragging}

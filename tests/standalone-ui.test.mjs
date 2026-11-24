@@ -278,6 +278,93 @@ test("standalone Annotate mounts self-contained Shadow DOM UI, opens toolbar, an
   });
   assert.equal(notch.getAttribute("data-dock-side"), "left", "dragging across viewport snaps notch to left side");
 
+  // Switching modes updates the ported WebGL2 GooeyNav canvas & active mode indicator.
+  const gooeyNav = notch.querySelector("[data-gooey-nav]");
+  const gooeyCanvas = notch.querySelector("[data-gooey-canvas]");
+  assert.ok(gooeyNav && gooeyCanvas, "mode group renders WebGL2 GooeyNav canvas");
+  assert.equal(gooeyNav.getAttribute("data-gooey-enabled"), "true");
+  assert.equal(gooeyNav.getAttribute("data-gooey-active"), "annotate");
+  await act(async () => {
+    spacingBtn.click();
+  });
+  assert.equal(gooeyNav.getAttribute("data-gooey-active"), "spacing");
+
+  // Opening Settings -> Gooey selection opens the React Bits Customize sheet with all 12 controls.
+  const settingsBtn = toolbar.querySelector('button[aria-label="Settings"]');
+  assert.ok(settingsBtn, "settings button exists on notch");
+  if (!shadow.querySelector("[data-open-notch-sheet]")) {
+    await act(async () => {
+      settingsBtn.click();
+    });
+  }
+  const openSheetBtn = shadow.querySelector("[data-open-notch-sheet]");
+  assert.ok(openSheetBtn, "settings panel includes trigger to open Notch & Gooey Nav sheet");
+  await act(async () => {
+    openSheetBtn.click();
+  });
+  const sheet = shadow.querySelector("[data-annotate-notch-sheet]");
+  assert.ok(sheet, "Notch & Gooey Nav Customize sheet opens");
+  for (const key of [
+    "preset",
+    "color",
+    "size",
+    "particleCount",
+    "spread",
+    "animationTime",
+    "timeVariance",
+    "gooeyness",
+    "wobble",
+    "frame",
+    "hoverEffect",
+    "enabled",
+  ]) {
+    assert.ok(sheet.querySelector(`[data-gooey-control="${key}"]`), `sheet exposes "${key}" control`);
+  }
+
+  // Selecting Accent preset updates pill color to #ff5a1f.
+  const presetBtn = sheet.querySelector('[data-gooey-control="preset"]');
+  await act(async () => {
+    presetBtn.click();
+  });
+  const accentOpt = sheet.querySelector('[data-option-value="accent"]');
+  assert.ok(accentOpt, "preset dropdown exposes Accent option");
+  await act(async () => {
+    accentOpt.click();
+  });
+  const colorInput = sheet.querySelector('input[data-gooey-control="color"]');
+  assert.equal(colorInput.value, "#ff5a1f");
+
+  // Reset restores defaults, ArrowRight increments Particle Count, Frame switch updates notch attribute.
+  const resetBtn = sheet.querySelector("[data-gooey-reset]");
+  await act(async () => {
+    resetBtn.click();
+  });
+  const particleSlider = sheet.querySelector('[data-gooey-control="particleCount"]');
+  assert.equal(particleSlider.getAttribute("aria-valuenow"), "15");
+  await act(async () => {
+    particleSlider.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+  });
+  assert.equal(particleSlider.getAttribute("aria-valuenow"), "16");
+
+  const frameSwitch = sheet.querySelector('[data-gooey-control="frame"]');
+  await act(async () => {
+    frameSwitch.click();
+  });
+  assert.equal(notch.getAttribute("data-gooey-frame"), "false");
+
+  await act(async () => {
+    resetBtn.click();
+  });
+  assert.equal(particleSlider.getAttribute("aria-valuenow"), "15");
+  assert.equal(notch.getAttribute("data-gooey-frame"), "true");
+
+  const closeSheetBtn = sheet.querySelector('button[aria-label="Close notch settings"]');
+  assert.ok(closeSheetBtn);
+  await act(async () => {
+    closeSheetBtn.click();
+  });
+  assert.equal(shadow.querySelector("[data-annotate-notch-sheet]"), null, "sheet closes cleanly");
+
   // Exiting returns to the collapsed Apple side notch launcher on the chosen side.
   await act(async () => {
     exitBtn.click();
