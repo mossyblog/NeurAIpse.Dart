@@ -58,6 +58,17 @@ const OWN_CSS = `
   --annotate-notch-bg: #ffffff;
   --annotate-notch-border: #dcdce2;
   --annotate-notch-shadow: 0 10px 28px -8px rgba(0, 0, 0, 0.16), 0 2px 8px -2px rgba(0, 0, 0, 0.08);
+  --annotate-customize-well-bg: rgba(24, 24, 27, 0.03);
+  --annotate-scrubber-track: rgba(24, 24, 27, 0.055);
+  --annotate-scrubber-fill: rgba(24, 24, 27, 0.09);
+  --annotate-scrubber-thumb: #71717a;
+  --annotate-scrubber-tick: #d1d1d4;
+  --annotate-scrubber-ghost: rgba(24, 24, 27, 0.07);
+  --annotate-scrubber-ghost-highlight: 0 1px 2px rgba(24, 24, 27, 0.05);
+  --annotate-scrubber-switch-track: #d4d4d8;
+  --annotate-scrubber-switch-checked: #52525b;
+  --annotate-scrubber-switch-knob: #ffffff;
+  --annotate-scrubber-switch-knob-checked: #ffffff;
 }
 .annotate-root [data-theme="dark"] {
   color-scheme: dark;
@@ -103,6 +114,17 @@ const OWN_CSS = `
   --annotate-notch-bg: #141416;
   --annotate-notch-border: #2a2a2f;
   --annotate-notch-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.6), 0 2px 8px -2px rgba(0, 0, 0, 0.35);
+  --annotate-customize-well-bg: rgba(255, 255, 255, 0.025);
+  --annotate-scrubber-track: rgba(255, 255, 255, 0.04);
+  --annotate-scrubber-fill: rgba(255, 255, 255, 0.06);
+  --annotate-scrubber-thumb: rgba(255, 255, 255, 0.9);
+  --annotate-scrubber-tick: #3f3f46;
+  --annotate-scrubber-ghost: rgba(255, 255, 255, 0.07);
+  --annotate-scrubber-ghost-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --annotate-scrubber-switch-track: #3f3f46;
+  --annotate-scrubber-switch-checked: #d4d4d8;
+  --annotate-scrubber-switch-knob: #a1a1aa;
+  --annotate-scrubber-switch-knob-checked: #18181b;
 }
 .annotate-root :is([data-theme="light"], [data-theme="dark"]) {
   --annotate-destructive-soft: color-mix(in srgb, var(--annotate-destructive) 12%, transparent);
@@ -146,10 +168,278 @@ const OWN_CSS = `
   width: 100%;
   height: 100%;
 }
+.annotate-customize-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 820px) {
+  .annotate-customize-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 520px) {
+  .annotate-customize-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.annotate-scrubber {
+  position: relative;
+  width: 100%;
+  user-select: none;
+}
+.annotate-scrubber-track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: var(--annotate-scrubber-track);
+  border: 1px solid transparent;
+  cursor: pointer;
+  overflow: hidden;
+  touch-action: pan-y;
+  outline: none;
+  outline-offset: 2px;
+  transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), background-color 150ms ease;
+}
+.annotate-scrubber-track:hover:not([data-disabled="true"]) {
+  background: color-mix(in srgb, var(--annotate-scrubber-track) 70%, var(--foreground) 6%);
+}
+.annotate-scrubber-track:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ring) 55%, transparent);
+}
+.annotate-scrubber-track[data-disabled="true"] {
+  opacity: 0.35;
+  pointer-events: none;
+}
+.annotate-scrubber-fill {
+  position: absolute;
+  inset: 0;
+  right: auto;
+  border-radius: 10px;
+  background: var(--annotate-scrubber-fill);
+  pointer-events: none;
+}
+.annotate-scrubber-ticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.annotate-scrubber-tick {
+  position: absolute;
+  top: 50%;
+  width: 1px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--annotate-scrubber-tick);
+  transform: translateX(-50%) translateY(-50%);
+}
+.annotate-scrubber-thumb-wrapper {
+  position: absolute;
+  top: 50%;
+  transform: translateX(-50%) translateY(-50%);
+  pointer-events: none;
+  z-index: 3;
+}
+.annotate-scrubber-thumb {
+  width: 5px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--annotate-scrubber-thumb);
+  opacity: 0.32;
+  transform: scaleX(0.7) scaleY(0.7);
+  transition: opacity 150ms cubic-bezier(0.22, 1, 0.36, 1), transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.annotate-scrubber-track[data-active="true"] .annotate-scrubber-thumb {
+  opacity: 0.9;
+  transform: scaleX(1) scaleY(1);
+}
+.annotate-scrubber-label {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  z-index: 4;
+}
+.annotate-scrubber-value {
+  position: relative;
+  flex-shrink: 0;
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 500;
+  pointer-events: none;
+  z-index: 4;
+}
+.annotate-scrubber-track--switch,
+.annotate-scrubber-track--select {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+}
+.annotate-scrubber-track--switch:active:not([data-disabled="true"]),
+.annotate-scrubber-track--select:active:not([data-disabled="true"]) {
+  transform: scale(0.985);
+}
+.annotate-scrubber-switch-toggle {
+  position: relative;
+  flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--annotate-scrubber-switch-track);
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  z-index: 4;
+  transition: background-color 150ms ease;
+}
+.annotate-scrubber-track--switch[data-checked="true"] .annotate-scrubber-switch-toggle {
+  background: var(--annotate-scrubber-switch-checked);
+}
+.annotate-scrubber-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--annotate-scrubber-switch-knob);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
+  transition: transform 150ms cubic-bezier(0.22, 1, 0.36, 1), background-color 150ms ease;
+}
+.annotate-scrubber-track--switch[data-checked="true"] .annotate-scrubber-switch-knob {
+  transform: translateX(16px);
+  background: var(--annotate-scrubber-switch-knob-checked);
+}
+.annotate-scrubber-select-right {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 4;
+  pointer-events: none;
+}
+.annotate-scrubber-track--select .annotate-scrubber-value {
+  font-weight: 400;
+}
+.annotate-scrubber-caret {
+  color: var(--muted-foreground);
+  transition: transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+  flex-shrink: 0;
+}
+.annotate-scrubber-caret--open {
+  transform: rotate(180deg);
+}
+.annotate-scrubber-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: var(--ann-shadow-float);
+  transform-origin: top center;
+  animation: annotate-enter 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.annotate-scrubber-dropdown--up {
+  top: auto;
+  bottom: calc(100% + 4px);
+  transform-origin: bottom center;
+}
+.annotate-scrubber-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  text-align: left;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.annotate-scrubber-dropdown-item:hover,
+.annotate-scrubber-dropdown-item--highlighted {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.annotate-scrubber-dropdown-item--active {
+  color: var(--foreground);
+  font-weight: 500;
+  background: var(--annotate-scrubber-ghost);
+}
+.annotate-scrubber-track--color {
+  padding: 0 10px 0 12px;
+  cursor: default;
+}
+.annotate-scrubber-color-controls {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 4;
+}
+.annotate-scrubber-color-swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.annotate-scrubber-color-swatch:active {
+  transform: scale(0.92);
+}
+.annotate-scrubber-color-text {
+  width: 72px;
+  height: 24px;
+  background: var(--annotate-scrubber-ghost);
+  border: 1px solid transparent;
+  box-shadow: var(--annotate-scrubber-ghost-highlight);
+  border-radius: 6px;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 0 8px;
+  text-transform: lowercase;
+  outline: none;
+}
+.annotate-scrubber-color-text:focus-visible {
+  border-color: var(--ring);
+}
 @media (prefers-reduced-motion: reduce) {
   .annotate-enter { animation: none; }
   .annotate-shake { animation: none; outline: 2px solid var(--ring); }
-  .annotate-notch-item {
+  .annotate-notch-item,
+  .annotate-scrubber-track,
+  .annotate-scrubber-thumb,
+  .annotate-scrubber-switch-toggle,
+  .annotate-scrubber-switch-knob,
+  .annotate-scrubber-caret,
+  .annotate-scrubber-dropdown,
+  .annotate-scrubber-dropdown-item,
+  .annotate-scrubber-color-swatch {
+    animation: none;
     transition: none;
   }
 }

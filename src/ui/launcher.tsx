@@ -67,7 +67,7 @@ export function Launcher({
         )}
       />
 
-      <span className="annotate-notch-icon flex size-4 items-center justify-center transition-transform duration-150 ease-out group-hover:scale-125 motion-reduce:transition-none">
+      <span className="annotate-notch-icon flex size-4 items-center justify-center transition-transform duration-150 ease-out group-hover:scale-110 motion-reduce:transition-none">
         <MessageSquarePlus aria-hidden />
       </span>
 

@@ -1,27 +1,42 @@
-import { useId, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Button } from "./primitives.tsx";
 import { Input } from "@ui-sdk/react/input";
 import { Radio, RadioGroup } from "@ui-sdk/react/radio";
 import { cn } from "cn";
-import { ChevronLeft, ChevronRight, Moon, Sun } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsUpDown, Moon, RotateCcw, Sparkles, Sun, X } from "lucide-react";
 import {
+  DEFAULT_GOOEY_NAV_SETTINGS,
+  GOOEY_NAV_BOUNDS,
   MARKER_COLOR_IDS,
   OUTPUT_DETAILS,
   OUTPUT_DETAIL_LABELS,
+  applyGooeyNavPreset,
+  isGooeyNavModified,
   nextOutputDetail,
   nextTheme,
   outputDetailLevel,
   webhookUrlError,
 } from "../core/settings.ts";
 import type { SyncStatus } from "../core/sync.ts";
-import type { OutputDetail, Settings, Theme } from "../core/types.ts";
+import type {
+  DockSide,
+  GooeyNavPreset,
+  GooeyNavSettings,
+  GooeyNavSize,
+  OutputDetail,
+  Settings,
+  Theme,
+} from "../core/types.ts";
 import { FIELD_CLASS, SURFACE_CLASS, SectionLabel, SegmentedControl } from "./chrome.tsx";
 import { MARKER_COLOR_NAMES, markerColor } from "./colors.ts";
+import { ScrubberColorPicker, ScrubberSelect, ScrubberSlider, ScrubberSwitch } from "./gooey-controls.tsx";
 import { Switch } from "./switch.tsx";
 
 export type SettingsPanelProps = {
   settings: Settings;
   theme: Theme;
+  /** Active dock side, used to anchor the Notch settings sheet. */
+  dockSide?: DockSide;
   /** Endpoint prop, shown read-only in the MCP section. */
   endpoint?: string;
   syncStatus?: SyncStatus;
@@ -30,10 +45,33 @@ export type SettingsPanelProps = {
   webhookUrlProp?: string;
   onChange: (settings: Settings) => void;
   onThemeChange: (theme: Theme) => void;
+  onClose?: () => void;
+  setEscape?: (handler: (() => boolean) | null) => void;
 };
 
 const DETAIL_TIP = "Controls how much detail is included in the copied output";
 const CLEAR_TIP = "Automatically clear annotations after copying";
+
+const PRESET_LABELS: Record<GooeyNavPreset, string> = {
+  classic: "Classic",
+  accent: "Accent",
+  splash: "Splash",
+  calm: "Calm",
+  custom: "Custom",
+};
+
+const PRESET_OPTIONS: readonly { value: Exclude<GooeyNavPreset, "custom">; label: string }[] = [
+  { value: "classic", label: "Classic" },
+  { value: "accent", label: "Accent" },
+  { value: "splash", label: "Splash" },
+  { value: "calm", label: "Calm" },
+];
+
+const SIZE_OPTIONS: readonly { value: GooeyNavSize; label: string }[] = [
+  { value: "sm", label: "Small" },
+  { value: "md", label: "Medium" },
+  { value: "lg", label: "Large" },
+];
 
 const OUTPUT_DETAIL_DESCRIPTIONS: Record<OutputDetail, string> = {
   compact: "Element, selector & comment only",
@@ -105,9 +143,12 @@ function MainView({
   webhookUrlProp,
   onChange,
   onThemeChange,
+  onClose,
   onManage,
+  onOpenNotchSheet,
 }: SettingsPanelProps & {
   onManage: () => void;
+  onOpenNotchSheet: () => void;
 }) {
   const id = useId();
   const set = (patch: Partial<Settings>) => onChange({ ...settings, ...patch });
@@ -119,12 +160,25 @@ function MainView({
 
   return (
     <>
-      <div className="flex items-center justify-between gap-2 border-b border-border/70 px-3.5 py-2.5">
-        <span className="text-xs font-semibold tracking-tight text-foreground">Settings</span>
-        <span className="text-[11px] text-muted-foreground">Feedback preferences</span>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/70 px-3 py-2">
+        <div className="flex min-w-0 items-baseline gap-1.5">
+          <span className="text-xs font-semibold tracking-tight text-foreground">Settings</span>
+          <span className="truncate text-[11px] text-muted-foreground">Feedback preferences</span>
+        </div>
+        {onClose && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Close settings"
+            className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={onClose}
+          >
+            <X className="size-3.5" />
+          </Button>
+        )}
       </div>
 
-      <div className="annotate-scroll flex flex-col divide-y divide-border/60 overflow-y-auto">
+      <div className="annotate-scroll flex min-h-0 flex-1 flex-col divide-y divide-border/60 overflow-y-auto">
         <div className="flex flex-col gap-2.5 px-3.5 py-3">
           <SectionLabel>Output</SectionLabel>
           <div className="flex flex-col gap-1">
@@ -132,7 +186,7 @@ function MainView({
               <Button
                 variant="outline"
                 size="xs"
-                className="h-7 gap-2 px-2 text-xs font-medium"
+                className="h-7 gap-1.5 px-2 text-xs font-medium"
                 aria-labelledby={`${id}-detail`}
                 aria-description={OUTPUT_DETAIL_LABELS[settings.outputDetail]}
                 title={DETAIL_TIP}
@@ -141,6 +195,7 @@ function MainView({
               >
                 <DetailDots level={level} />
                 <span>{OUTPUT_DETAIL_LABELS[settings.outputDetail]}</span>
+                <ChevronsUpDown aria-hidden className="size-3 text-muted-foreground" />
               </Button>
             </Row>
             <p className="text-[11px] leading-snug text-muted-foreground">
@@ -183,7 +238,7 @@ function MainView({
                     title={MARKER_COLOR_NAMES[colorId]}
                     data-color-id={colorId}
                     className={cn(
-                      "size-5 cursor-pointer rounded-full transition-transform duration-150 outline-none hover:scale-110 focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none",
+                      "size-5 cursor-pointer rounded-full transition-transform duration-150 outline-none hover:scale-110 focus-visible:ring-2 focus-visible:ring-ring/50 motion-reduce:transition-none",
                       selected
                         ? "scale-105 ring-2 ring-foreground ring-offset-2 ring-offset-popover"
                         : "ring-1 ring-foreground/15",
@@ -237,6 +292,22 @@ function MainView({
                 })}
               </RadioGroup>
             </SegmentedControl>
+          </Row>
+          <Row label="Gooey selection" labelId={`${id}-gooey-sheet`}>
+            <Button
+              variant="outline"
+              size="xs"
+              className="h-7 gap-1.5 px-2 text-xs font-medium"
+              aria-labelledby={`${id}-gooey-sheet`}
+              data-open-notch-sheet=""
+              onClick={onOpenNotchSheet}
+            >
+              <Sparkles className="size-3.5 text-muted-foreground" />
+              <span>
+                {settings.gooeyNav.enabled ? PRESET_LABELS[settings.gooeyNav.preset] : "Off"}
+              </span>
+              <ChevronRight className="size-3.5 text-muted-foreground" />
+            </Button>
           </Row>
         </div>
 
@@ -322,6 +393,7 @@ function WebhooksView({
   webhookUrlProp,
   onChange,
   onBack,
+  onClose,
 }: SettingsPanelProps & { onBack: () => void }) {
   const id = useId();
   const [draft, setDraft] = useState(settings.webhookUrl);
@@ -330,25 +402,38 @@ function WebhooksView({
 
   return (
     <>
-      <div className="flex items-center gap-1.5 border-b border-border/70 px-2 py-2">
-        <Button
-          variant="ghost"
-          size="xs"
-          className="gap-1 px-1.5 text-xs text-muted-foreground hover:text-foreground"
-          onClick={onBack}
-        >
-          <ChevronLeft className="size-3.5" />
-          Back
-        </Button>
-        <span aria-hidden className="text-xs text-muted-foreground/50">
-          ·
-        </span>
-        <span className="truncate text-xs font-semibold tracking-tight text-foreground">
-          MCP &amp; Webhooks
-        </span>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/70 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="xs"
+            className="gap-1 px-1.5 text-xs text-muted-foreground hover:text-foreground"
+            onClick={onBack}
+          >
+            <ChevronLeft className="size-3.5" />
+            Back
+          </Button>
+          <span aria-hidden className="text-xs text-muted-foreground/50">
+            ·
+          </span>
+          <span className="truncate text-xs font-semibold tracking-tight text-foreground">
+            MCP &amp; Webhooks
+          </span>
+        </div>
+        {onClose && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Close settings"
+            className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={onClose}
+          >
+            <X className="size-3.5" />
+          </Button>
+        )}
       </div>
 
-      <div className="annotate-scroll flex flex-col divide-y divide-border/60 overflow-y-auto">
+      <div className="annotate-scroll flex min-h-0 flex-1 flex-col divide-y divide-border/60 overflow-y-auto">
         <div className="flex flex-col gap-2 px-3.5 py-3">
           <SectionLabel>MCP</SectionLabel>
           <div className="flex flex-col gap-1.5 rounded-lg border border-border/70 bg-muted/40 px-2.5 py-2">
@@ -416,20 +501,270 @@ function WebhooksView({
   );
 }
 
+function NotchSettingsSheet({
+  settings,
+  theme,
+  onChange,
+  onBack,
+  onClose,
+  onRegisterEscape,
+}: {
+  settings: Settings;
+  theme: Theme;
+  onChange: (settings: Settings) => void;
+  onBack: () => void;
+  onClose?: () => void;
+  onRegisterEscape?: (handler: (() => boolean) | null) => void;
+}) {
+  const gooey = settings.gooeyNav;
+  const setGooey = (patch: Partial<GooeyNavSettings>) =>
+    onChange({ ...settings, gooeyNav: { ...gooey, ...patch } });
+  const setFeel = (patch: Partial<GooeyNavSettings>) =>
+    setGooey({ ...patch, preset: "custom" });
+  const modified = isGooeyNavModified(gooey);
+  const defaultPill = theme === "light" ? "#27272a" : "#f4f4f5";
+
+  return (
+    <div
+      role="dialog"
+      aria-label="Notch settings"
+      data-annotate-notch-sheet=""
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/70 px-3 py-2">
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="xs"
+            className="gap-1 px-1.5 text-xs text-muted-foreground hover:text-foreground"
+            onClick={onBack}
+          >
+            <ChevronLeft className="size-3.5" />
+            Settings
+          </Button>
+          <span aria-hidden className="text-xs text-muted-foreground/50">
+            ·
+          </span>
+          <span className="text-xs font-semibold tracking-tight text-foreground">Customize</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="xs"
+            disabled={!modified}
+            className={cn(
+              "h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground",
+              !modified && "opacity-40",
+            )}
+            title="Reset Gooey Nav defaults"
+            data-gooey-reset=""
+            onClick={() =>
+              onChange({
+                ...settings,
+                gooeyNav: { ...DEFAULT_GOOEY_NAV_SETTINGS, colors: [] },
+              })
+            }
+          >
+            <RotateCcw className="size-3" />
+            Reset
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Close settings"
+            className="size-6 text-muted-foreground hover:text-foreground"
+            onClick={onClose ?? onBack}
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="annotate-scroll min-h-0 flex-1 overflow-y-auto p-3">
+        <div className="rounded-xl border border-border/60 bg-[var(--annotate-customize-well-bg)] p-2">
+          <div className="annotate-customize-grid">
+            <ScrubberSelect
+              title="Preset"
+              options={PRESET_OPTIONS}
+              value={gooey.preset}
+              displayLabel={gooey.preset === "custom" ? PRESET_LABELS.custom : undefined}
+              disabled={!gooey.enabled}
+              controlKey="preset"
+              onRegisterEscape={onRegisterEscape}
+              onChange={(preset) =>
+                onChange({ ...settings, gooeyNav: applyGooeyNavPreset(gooey, preset) })
+              }
+            />
+            <ScrubberColorPicker
+              title="Pill Color"
+              color={gooey.color || defaultPill}
+              disabled={!gooey.enabled}
+              controlKey="color"
+              onRegisterEscape={onRegisterEscape}
+              onChange={(color) => setFeel({ color, colors: [] })}
+            />
+            <ScrubberSelect
+              title="Size"
+              options={SIZE_OPTIONS}
+              value={gooey.size}
+              controlKey="size"
+              onRegisterEscape={onRegisterEscape}
+              onChange={(size) => setGooey({ size })}
+            />
+            <ScrubberSlider
+              title="Particle Count"
+              min={GOOEY_NAV_BOUNDS.particleCount.min}
+              max={GOOEY_NAV_BOUNDS.particleCount.max}
+              step={GOOEY_NAV_BOUNDS.particleCount.step}
+              value={gooey.particleCount}
+              disabled={!gooey.enabled}
+              controlKey="particleCount"
+              onChange={(particleCount) => setFeel({ particleCount })}
+            />
+            <ScrubberSlider
+              title="Spread"
+              min={GOOEY_NAV_BOUNDS.spread.min}
+              max={GOOEY_NAV_BOUNDS.spread.max}
+              step={GOOEY_NAV_BOUNDS.spread.step}
+              value={gooey.spread}
+              valueUnit="px"
+              disabled={!gooey.enabled}
+              controlKey="spread"
+              onChange={(spread) => setFeel({ spread })}
+            />
+            <ScrubberSlider
+              title="Animation Time"
+              min={GOOEY_NAV_BOUNDS.animationTime.min}
+              max={GOOEY_NAV_BOUNDS.animationTime.max}
+              step={GOOEY_NAV_BOUNDS.animationTime.step}
+              value={gooey.animationTime}
+              valueUnit="ms"
+              disabled={!gooey.enabled}
+              controlKey="animationTime"
+              onChange={(animationTime) => setFeel({ animationTime })}
+            />
+            <ScrubberSlider
+              title="Time Variance"
+              min={GOOEY_NAV_BOUNDS.timeVariance.min}
+              max={GOOEY_NAV_BOUNDS.timeVariance.max}
+              step={GOOEY_NAV_BOUNDS.timeVariance.step}
+              value={gooey.timeVariance}
+              valueUnit="ms"
+              disabled={!gooey.enabled}
+              controlKey="timeVariance"
+              onChange={(timeVariance) => setFeel({ timeVariance })}
+            />
+            <ScrubberSlider
+              title="Gooeyness"
+              min={GOOEY_NAV_BOUNDS.gooeyness.min}
+              max={GOOEY_NAV_BOUNDS.gooeyness.max}
+              step={GOOEY_NAV_BOUNDS.gooeyness.step}
+              value={gooey.gooeyness}
+              disabled={!gooey.enabled}
+              controlKey="gooeyness"
+              onChange={(gooeyness) => setFeel({ gooeyness })}
+            />
+            <ScrubberSlider
+              title="Wobble"
+              min={GOOEY_NAV_BOUNDS.wobble.min}
+              max={GOOEY_NAV_BOUNDS.wobble.max}
+              step={GOOEY_NAV_BOUNDS.wobble.step}
+              value={gooey.wobble}
+              disabled={!gooey.enabled}
+              controlKey="wobble"
+              onChange={(wobble) => setFeel({ wobble })}
+            />
+            <ScrubberSwitch
+              title="Frame"
+              checked={gooey.frame}
+              controlKey="frame"
+              onChange={(frame) => setGooey({ frame })}
+            />
+            <ScrubberSwitch
+              title="Hover Effect"
+              checked={gooey.hoverEffect}
+              disabled={!gooey.enabled}
+              controlKey="hoverEffect"
+              onChange={(hoverEffect) => setGooey({ hoverEffect })}
+            />
+            <ScrubberSwitch
+              title="Gooey Effect"
+              checked={gooey.enabled}
+              controlKey="enabled"
+              onChange={(enabled) => setGooey({ enabled })}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Feedback settings (spec section 4). Every change is persisted by the caller. */
 export function SettingsPanel(props: SettingsPanelProps) {
   const [view, setView] = useState<"main" | "webhooks">("main");
+  const [notchSheetOpen, setNotchSheetOpen] = useState(false);
+  const controlEscapeRef = useRef<(() => boolean) | null>(null);
+  const stateRef = useRef({ view, notchSheetOpen });
+  stateRef.current = { view, notchSheetOpen };
+
+  const registerControlEscape = useCallback((handler: (() => boolean) | null) => {
+    controlEscapeRef.current = handler;
+  }, []);
+
+  const { setEscape } = props;
+  useEffect(() => {
+    const handleEscape = (): boolean => {
+      if (controlEscapeRef.current?.()) return true;
+      if (stateRef.current.notchSheetOpen) {
+        setNotchSheetOpen(false);
+        return true;
+      }
+      if (stateRef.current.view === "webhooks") {
+        setView("main");
+        return true;
+      }
+      return false;
+    };
+    if (setEscape) {
+      setEscape(handleEscape);
+      return () => setEscape(null);
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented && handleEscape()) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [setEscape]);
+
   return (
     <section
       role="region"
       aria-label="Feedback settings"
       className={cn(
-        "annotate-enter flex max-h-[calc(100vh-116px)] w-80 flex-col overflow-hidden text-sm",
+        "annotate-enter flex max-h-[calc(100vh-32px)] flex-col overflow-hidden text-sm",
+        notchSheetOpen ? "w-[min(740px,calc(100vw-88px))]" : "w-80",
         SURFACE_CLASS,
       )}
     >
-      {view === "main" ? (
-        <MainView {...props} onManage={() => setView("webhooks")} />
+      {notchSheetOpen ? (
+        <NotchSettingsSheet
+          settings={props.settings}
+          theme={props.theme}
+          onChange={props.onChange}
+          onBack={() => setNotchSheetOpen(false)}
+          onClose={props.onClose}
+          onRegisterEscape={registerControlEscape}
+        />
+      ) : view === "main" ? (
+        <MainView
+          {...props}
+          onManage={() => setView("webhooks")}
+          onOpenNotchSheet={() => setNotchSheetOpen(true)}
+        />
       ) : (
         <WebhooksView {...props} onBack={() => setView("main")} />
       )}

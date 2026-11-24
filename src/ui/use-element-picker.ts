@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { deepElementFromPoint } from "../core/spacing-dom.ts";
 import { GROUP_ATTRIBUTE, PREVIEW_ATTRIBUTE, PROBE_ATTRIBUTE } from "../core/style-change.ts";
 import { isFromSurface, type Surface } from "./shadow-surface.ts";
@@ -23,6 +23,12 @@ export function useElementPicker(options: {
   const { surface } = options;
   const [hover, setHover] = useState<Element | null>(null);
   const [tick, setTick] = useState(0);
+  const frameRef = useRef(0);
+  const [redraw] = useState(() => () => {
+    cancelAnimationFrame(frameRef.current);
+    frameRef.current = requestAnimationFrame(() => setTick((t) => t + 1));
+  });
+  useEffect(() => () => cancelAnimationFrame(frameRef.current), []);
 
   const isOverlay = (el: Element) => el === surface.host || el.getRootNode() === surface.shadow;
   const at = (x: number, y: number) => {
@@ -31,7 +37,10 @@ export function useElementPicker(options: {
   };
 
   const onMove = useEffectEvent((event: PointerEvent) => {
-    if (isFromSurface(event, surface)) return;
+    if (isFromSurface(event, surface)) {
+      setHover(null);
+      return;
+    }
     const next = at(event.clientX, event.clientY);
     setHover((current) => (current === next ? current : next));
   });
@@ -86,5 +95,5 @@ export function useElementPicker(options: {
     };
   }, [surface]);
 
-  return { hover, tick, isOverlay, redraw: () => setTick((t) => t + 1) };
+  return { hover, tick, isOverlay, redraw };
 }

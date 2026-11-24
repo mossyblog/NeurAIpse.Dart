@@ -5,13 +5,16 @@ import { Textarea } from "@ui-sdk/react/textarea";
 import { cn } from "cn";
 import { SquareArrowOutUpRight } from "lucide-react";
 import { isTrustworthySourceFile } from "../core/source-map.ts";
+import type { DockSide } from "../core/types.ts";
 import { KbdHint, SURFACE_CLASS } from "./chrome.tsx";
 
 const WIDTH = 320;
 const EDGE = 16;
+const DOCK_INSET = 64;
 const GAP = 16;
 /** Typical popup height, used to decide whether to flip above the target. */
 const ESTIMATED_HEIGHT = 228;
+const SELECTED_TEXT_HEIGHT = 68;
 
 export type PopupProps = {
   element: string;
@@ -22,6 +25,8 @@ export type PopupProps = {
   accent: string;
   /** Viewport point the popup is placed against. */
   point: { x: number; y: number };
+  /** Active dock side, used to keep the popup clear of the docked notch. */
+  dockSide?: DockSide;
   closing: boolean;
   /** Increments on each outside click. */
   shake: number;
@@ -33,11 +38,20 @@ export type PopupProps = {
   onCancel: () => void;
 };
 
-function placement(point: { x: number; y: number }): CSSProperties {
+function placement(
+  point: { x: number; y: number },
+  dockSide?: DockSide,
+  hasSelectedText?: boolean,
+): CSSProperties {
   const width = window.innerWidth;
   const height = window.innerHeight;
-  const left = Math.min(Math.max(EDGE, point.x - WIDTH / 2), Math.max(EDGE, width - WIDTH - EDGE));
-  const below = point.y + GAP + ESTIMATED_HEIGHT <= height - EDGE;
+  const leftInset = dockSide === "left" ? DOCK_INSET : EDGE;
+  const rightInset = dockSide === "right" ? DOCK_INSET : EDGE;
+  const effectiveWidth = Math.min(WIDTH, Math.max(0, width - EDGE * 2));
+  const maxLeft = Math.max(leftInset, width - effectiveWidth - rightInset);
+  const left = Math.min(Math.max(leftInset, point.x - effectiveWidth / 2), maxLeft);
+  const estimatedHeight = ESTIMATED_HEIGHT + (hasSelectedText ? SELECTED_TEXT_HEIGHT : 0);
+  const below = point.y + GAP + estimatedHeight <= height - EDGE;
   return below
     ? { left, top: Math.max(EDGE, point.y + GAP) }
     : { left, bottom: Math.max(EDGE, height - point.y + GAP) };
@@ -80,7 +94,10 @@ export function Popup(props: PopupProps) {
   };
 
   return (
-    <div className="fixed z-20 w-80" style={placement(props.point)}>
+    <div
+      className="fixed z-30 w-80 max-w-[calc(100vw-32px)]"
+      style={placement(props.point, props.dockSide, Boolean(props.selectedText))}
+    >
       <Dialog open={!props.closing} modal={false} dismissible={false} closeOnOutsidePress={false}>
         <DialogContent
           inline
@@ -146,7 +163,7 @@ export function Popup(props: PopupProps) {
               placeholder="What should change?"
               aria-label="Feedback"
               style={{ "--ring": props.accent } as CSSProperties}
-              className="min-h-20 w-full resize-y rounded-lg border border-border bg-background px-2.5 py-2 text-xs leading-relaxed text-foreground shadow-2xs transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/35"
+              className="min-h-20 w-full resize-y rounded-lg border border-border bg-background px-2.5 py-2 text-xs leading-relaxed text-foreground shadow-2xs transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
             />
           </div>
 

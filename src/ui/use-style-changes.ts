@@ -44,8 +44,8 @@ export type StyleChangesOptions = {
   onAdd?: (a: Annotation) => void;
   onUpdate?: (a: Annotation) => void;
   onDelete?: (a: Annotation) => void;
-  /** Preview is live only in inspector modes (spec 6 revert rules). */
-  previewEnabled: boolean;
+  /** Live preview stays applied across mode switches and overlay hide unless explicitly disabled. */
+  previewEnabled?: boolean;
   /** Called after each preview write (overlays redraw). */
   onPreview?: () => void;
 };
@@ -258,12 +258,42 @@ export function useStyleChanges(options: StyleChangesOptions) {
   const findFor = (el: Element, property: string): Annotation | undefined =>
     latest.current.annotations.find((a) => a.kind === "style-change" && a.styleChange?.property === property && elementsFor(a).includes(el));
 
-  // One preview for every category, live only in inspector modes (spec 6 revert rules).
-  const { annotations, previewEnabled } = options;
+  // One preview for every category, kept live across mode switches and overlay hide until cleared or unmounted.
+  const { annotations } = options;
+  const previewEnabled = options.previewEnabled ?? true;
   /** Live I9 handle-drag values (see `setDraft`). A ref: it changes on every pointer move. */
   const draftRef = useRef<DraftEntry[] | null>(null);
   useEffect(() => {
     if (!preview) return;
+    const ids = new Set(annotations.map((a) => a.id));
+    for (const id of Array.from(live.keys())) {
+      if (!ids.has(id)) live.delete(id);
+    }
+    if (previewEnabled) {
+      // Auto-reattach stored style-change records (e.g. loaded from storage on mount).
+      for (const a of annotations) {
+        if (a.kind !== "style-change" || !a.styleChange) continue;
+        if (live.get(a.id)?.some((el) => el.isConnected)) continue;
+        const selectors = a.styleChange.group.selectors ?? (a.elementPath ? [a.elementPath] : []);
+        const found: Element[] = [];
+        for (const selector of selectors) {
+          try {
+            const matches = document.querySelectorAll(selector);
+            if (matches.length !== 1) {
+              found.length = 0;
+              break;
+            }
+            found.push(matches[0]);
+          } catch {
+            found.length = 0;
+            break;
+          }
+        }
+        if (found.length === a.styleChange.group.count && found.length > 0) {
+          live.set(a.id, found);
+        }
+      }
+    }
     preview.apply(previewEnabled ? previewEntries(annotations, live, draftRef.current) : []);
     if (previewEnabled) latest.current.onPreview?.();
   }, [preview, annotations, previewEnabled, attached, live]);
@@ -277,7 +307,7 @@ export function useStyleChanges(options: StyleChangesOptions) {
    */
   const setDraft = (entries: DraftEntry[] | null) => {
     draftRef.current = entries;
-    if (!preview || !latest.current.previewEnabled) return;
+    if (!preview || !(latest.current.previewEnabled ?? true)) return;
     preview.apply(previewEntries(latest.current.annotations, live, entries));
     latest.current.onPreview?.();
   };

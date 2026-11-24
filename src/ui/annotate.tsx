@@ -46,7 +46,7 @@ import { markerColor } from "./colors.ts";
 import { Highlight, type HoverTarget } from "./highlight.tsx";
 import { Launcher } from "./launcher.tsx";
 import { LayoutMode } from "./layout-mode.tsx";
-import { RearrangeMode } from "./rearrange-mode.tsx";
+import { RearrangeMode, useRearrangePreview } from "./rearrange-mode.tsx";
 import { rearrangeItems } from "../core/rearrange-output.ts";
 import { Markers } from "./markers.tsx";
 import { Popup } from "./popup.tsx";
@@ -57,7 +57,8 @@ import { pendingItems, type InspectorContext } from "./inspector-context.ts";
 import { SpacingInspector } from "./spacing-inspector.tsx";
 import { TypeInspector } from "./type-inspector.tsx";
 import { useStyleChanges } from "./use-style-changes.ts";
-import { useShadowSurface, type Surface } from "./shadow-surface.ts";
+import { RulerLayer, type RulerMeasurement } from "./ruler-mode.tsx";
+import { isFromSurface, useShadowSurface, type Surface } from "./shadow-surface.ts";
 import { Toolbar } from "./toolbar.tsx";
 import { useAnnotations } from "./use-annotations.ts";
 import { useDragPosition } from "./use-drag-position.ts";
@@ -100,7 +101,7 @@ export type AnnotateProps = {
 };
 
 /** Toolbar tool modes (inspector spec 2): mutually exclusive. */
-export type ToolMode = "annotate" | "spacing" | "type" | "color" | "layout" | "rearrange";
+export type ToolMode = "annotate" | "spacing" | "type" | "color" | "layout" | "rearrange" | "measure-v" | "measure-h";
 
 type PopupState = {
   route: string;
@@ -219,6 +220,7 @@ export function Annotate({
   const [sendState, setSendState] = useState<SendState>("idle");
   /** Inspector spec 2: Annotate, Spacing, Type and Colour are mutually exclusive tool modes. */
   const [mode, setMode] = useState<ToolMode>("annotate");
+  const [rulers, setRulers] = useState<RulerMeasurement[]>([]);
   /** Edit request from an inspector's pending list (re-targets that change). */
   const [focus, setFocus] = useState<{ id: string; n: number } | null>(null);
   /** Spacing inspector escape hook: true when it consumed Esc (Lines clears pins first, spec 14.4). */
@@ -226,6 +228,15 @@ export function Annotate({
   const [setEscape] = useState(() => (handler: (() => boolean) | null) => {
     inspectorEscape.current = handler;
   });
+  /** Innermost-first Escape hook for Settings subviews & open scrubber dropdowns. */
+  const settingsEscape = useRef<(() => boolean) | null>(null);
+  const [setSettingsEscape] = useState(() => (handler: (() => boolean) | null) => {
+    settingsEscape.current = handler;
+  });
+  const settingsOpenRef = useRef(settingsOpen);
+  settingsOpenRef.current = settingsOpen;
+  const [settingsPopoverEl, setSettingsPopoverEl] = useState<HTMLDivElement | null>(null);
+  const [settingsHeight, setSettingsHeight] = useState(440);
   const timers = useRef<number[]>([]);
   /** Latest list and route, read after the clipboard await. */
   const latest = useRef({ route, annotations });
@@ -284,7 +295,7 @@ export function Annotate({
     annotations,
     commit,
     attributeNames,
-    previewEnabled: active && mode !== "annotate",
+    previewEnabled: true,
     sourceFor: (el) => (settings.reactEnabled ? getReactInfo(el, settingsReactMode(settings)).sourceFile : undefined),
     enrich: (el, apply) => {
       if (!settings.reactEnabled) return;
@@ -305,6 +316,7 @@ export function Annotate({
       void notifyWebhook("annotation.delete", { annotation });
     },
   });
+  const rearrangePreview = useRearrangePreview(annotations);
 
   useEffect(() => {
     latest.current = { route, annotations };
@@ -312,6 +324,66 @@ export function Annotate({
   });
   useEffect(() => () => timers.current.forEach((id) => window.clearTimeout(id)), []);
   useEffect(() => () => unfreezeRef.current?.(), []);
+
+  // Measure actual Settings popover height so viewport clamping stays accurate across views.
+  useEffect(() => {
+    if (!settingsPopoverEl) return;
+    const measure = () => {
+      const h = settingsPopoverEl.getBoundingClientRect().height;
+      if (h > 0) setSettingsHeight((prev) => (Math.abs(prev - h) < 1 ? prev : h));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const h = entries[0]?.contentRect.height ?? settingsPopoverEl.getBoundingClientRect().height;
+      if (h > 0) setSettingsHeight((prev) => (Math.abs(prev - h) < 1 ? prev : h));
+    });
+    observer.observe(settingsPopoverEl);
+    return () => observer.disconnect();
+  }, [settingsPopoverEl]);
+
+  // Dismiss Settings on outside page click without triggering element picking or page actions.
+  useEffect(() => {
+    if (!active) return;
+    let swallowClick = false;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!settingsOpenRef.current) return;
+      if (isFromSurface(event, surface)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      swallowClick = true;
+      setSettingsOpen(false);
+    };
+    const onFollowUp = (event: Event) => {
+      if (!swallowClick || isFromSurface(event, surface)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.type === "click") swallowClick = false;
+    };
+    const windows = [window, ...frameWindows];
+    for (const win of windows) {
+      try {
+        win.addEventListener("pointerdown", onPointerDown, true);
+        win.addEventListener("pointerup", onFollowUp, true);
+        win.addEventListener("mouseup", onFollowUp, true);
+        win.addEventListener("click", onFollowUp, true);
+      } catch {
+        // Frame gone.
+      }
+    }
+    return () => {
+      for (const win of windows) {
+        try {
+          win.removeEventListener("pointerdown", onPointerDown, true);
+          win.removeEventListener("pointerup", onFollowUp, true);
+          win.removeEventListener("mouseup", onFollowUp, true);
+          win.removeEventListener("click", onFollowUp, true);
+        } catch {
+          // Frame gone.
+        }
+      }
+    };
+  }, [active, frameWindows, surface]);
 
   // Pending multi-select outlines follow the page while it scrolls.
   useEffect(() => {
@@ -430,6 +502,7 @@ export function Annotate({
 
   const openNew = (result: ElementCapture, point: Point, target?: Element) => {
     setHover(null);
+    setSettingsOpen(false);
     setPopup({
       mode: "new",
       route,
@@ -483,6 +556,7 @@ export function Annotate({
 
   const clearAll = () => {
     setMulti(null);
+    setRulers([]);
     if (annotations.length === 0) return;
     const cleared = annotations;
     elements.current.clear();
@@ -595,18 +669,32 @@ export function Annotate({
     else if (action === "subMode") selectSubMode(nextSubMode(subMode));
     else if (action === "layout") selectMode(mode === "layout" ? "annotate" : "layout");
     else if (action === "rearrange") selectMode(mode === "rearrange" ? "annotate" : "rearrange");
+    else if (action === "measureV") selectMode(mode === "measure-v" ? "annotate" : "measure-v");
+    else if (action === "measureH") selectMode(mode === "measure-h" ? "annotate" : "measure-h");
   };
 
   const onEscape = () => {
-    // Inspector first: Esc drops pins and the preview and returns to Annotate (spec 2).
-    // Lines clears its pins on the first Esc (spec 14.4).
-    // Layout steps back too: text edit, comment, armed ghost, selection, then the mode.
-    if ((mode === "spacing" || mode === "layout" || mode === "rearrange") && inspectorEscape.current?.()) return;
-    if (mode !== "annotate") selectMode("annotate");
-    else if (popup) closePopup();
-    else if (multi) setMulti(null);
-    else if (settingsOpen) setSettingsOpen(false);
-    else deactivate();
+    // Innermost-first: open scrubber dropdowns / Settings subviews -> Settings -> Popup ->
+    // active inspector selection/pins -> tool mode -> multi-select -> deactivate.
+    if (settingsOpen) {
+      if (settingsEscape.current?.()) return;
+      setSettingsOpen(false);
+      return;
+    }
+    if (popup) {
+      closePopup();
+      return;
+    }
+    if (inspectorEscape.current?.()) return;
+    if (mode !== "annotate") {
+      selectMode("annotate");
+      return;
+    }
+    if (multi) {
+      setMulti(null);
+      return;
+    }
+    deactivate();
   };
 
   useShortcuts({
@@ -627,7 +715,7 @@ export function Annotate({
   usePicker({
     surface,
     frameWindows,
-    active: active && mode === "annotate",
+    active: active && !markersHidden && mode === "annotate" && !settingsOpen,
     popupOpen: Boolean(popup),
     blockInteractions: settings.blockInteractions,
     multiPending: Boolean(multi && multi.elements.length > 0),
@@ -701,6 +789,7 @@ export function Annotate({
 
   function selectMode(next: ToolMode) {
     if (next === mode) return;
+    setMarkersHidden(false);
     setHover(null);
     setPopup(null);
     setMulti(null);
@@ -714,6 +803,7 @@ export function Annotate({
       return;
     }
     const tracked = positions.get(annotation.id) ?? undefined;
+    setSettingsOpen(false);
     setPopup({
       mode: "edit",
       route,
@@ -746,7 +836,7 @@ export function Annotate({
   const toggleDockSide = () =>
     updateSettings({ ...settings, dockSide: nextDockSide(settings.dockSide) });
 
-  const settingsCenterY = clampNotchCenterY(notchCenterY, 440, viewport.height, 16);
+  const settingsCenterY = clampNotchCenterY(notchCenterY, settingsHeight, viewport.height, 16);
   const rootInsets = {
     "--annotate-inset-right": active && dockSide === "right" ? "64px" : "16px",
     "--annotate-inset-left": active && dockSide === "left" ? "64px" : "16px",
@@ -754,6 +844,7 @@ export function Annotate({
 
   const settingsPanel = active && settingsOpen && (
     <div
+      ref={setSettingsPopoverEl}
       data-annotate-settings-popover=""
       style={{ top: settingsCenterY, transform: "translateY(-50%)" }}
       className={cn(
@@ -764,12 +855,15 @@ export function Annotate({
       <SettingsPanel
         settings={settings}
         theme={theme}
+        dockSide={dockSide}
         endpoint={props.endpoint}
         syncStatus={sync.status}
         sessionId={sync.sessionId}
         webhookUrlProp={props.webhookUrl}
         onChange={updateSettings}
         onThemeChange={updateTheme}
+        onClose={() => setSettingsOpen(false)}
+        setEscape={setSettingsEscape}
       />
     </div>
   );
@@ -785,100 +879,120 @@ export function Annotate({
       style={rootInsets}
       className="text-foreground"
     >
-      {active && !markersHidden && (
-        <Markers
-          annotations={feedback}
-          color={accent}
-          positions={positions}
-          activeId={popup?.mode === "edit" ? popup.annotation.id : undefined}
-          onSelect={onMarkerSelect}
-        />
-      )}
-      {active && mode === "spacing" && <SpacingInspector key={subMode} ctx={inspectorCtx} />}
-      {active && mode === "type" && <TypeInspector ctx={inspectorCtx} />}
-      {active && mode === "color" && <ColorInspector ctx={inspectorCtx} />}
-      {active && mode === "rearrange" && (
-        <RearrangeMode
-          ctx={{
-            surface,
-            attributeNames,
-            annotations,
-            commit,
-            color: accent,
-            sourceFor: (el) => (settings.reactEnabled ? getReactInfo(el, settingsReactMode(settings)).sourceFile : undefined),
-            onAdd: (annotation) => {
+      <div
+        data-annotate-overlays-layer=""
+        data-overlays-hidden={active && markersHidden ? "" : undefined}
+        style={active && markersHidden ? { display: "none" } : undefined}
+      >
+        {active && !markersHidden && (
+          <Markers
+            annotations={feedback}
+            color={accent}
+            positions={positions}
+            activeId={popup?.mode === "edit" ? popup.annotation.id : undefined}
+            onSelect={onMarkerSelect}
+          />
+        )}
+        {active && mode === "spacing" && <SpacingInspector key={subMode} ctx={inspectorCtx} />}
+        {active && mode === "type" && <TypeInspector ctx={inspectorCtx} />}
+        {active && mode === "color" && <ColorInspector ctx={inspectorCtx} />}
+        {active && mode === "rearrange" && (
+          <RearrangeMode
+            ctx={{
+              surface,
+              attributeNames,
+              annotations,
+              commit,
+              rearrangePreview,
+              color: accent,
+              sourceFor: (el) => (settings.reactEnabled ? getReactInfo(el, settingsReactMode(settings)).sourceFile : undefined),
+              onAdd: (annotation) => {
+                props.onAnnotationAdd?.(annotation);
+                void notifyWebhook("annotation.add", { annotation });
+              },
+              onUpdate: (annotation) => {
+                props.onAnnotationUpdate?.(annotation);
+                void notifyWebhook("annotation.update", { annotation });
+              },
+              onDelete: (annotation) => {
+                props.onAnnotationDelete?.(annotation);
+                void notifyWebhook("annotation.delete", { annotation });
+              },
+              notify: (text) => flash(text),
+              setEscape,
+              onCopy: () => void copy(),
+            }}
+          />
+        )}
+        {((active && mode === "layout") || ((!active || !markersHidden) && placements.length > 0)) && (
+          <LayoutMode
+            key={active && mode === "layout" ? "edit" : "view"}
+            placements={placements}
+            interactive={active && mode === "layout"}
+            showChrome={active}
+            accent={accent}
+            surface={surface}
+            attributeNames={attributeNames}
+            setEscape={setEscape}
+            apply={(update) => updateRoute(route, update)}
+            onAdd={(annotation) => {
               props.onAnnotationAdd?.(annotation);
               void notifyWebhook("annotation.add", { annotation });
-            },
-            onUpdate: (annotation) => {
+            }}
+            onUpdate={(annotation) => {
               props.onAnnotationUpdate?.(annotation);
               void notifyWebhook("annotation.update", { annotation });
-            },
-            onDelete: (annotation) => {
+            }}
+            onDelete={(annotation) => {
               props.onAnnotationDelete?.(annotation);
               void notifyWebhook("annotation.delete", { annotation });
-            },
-            notify: (text) => flash(text),
-            setEscape,
-            onCopy: () => void copy(),
-          }}
-        />
-      )}
-      {active && (mode === "layout" || (!markersHidden && placements.length > 0)) && (
-        <LayoutMode
-          key={mode === "layout" ? "edit" : "view"}
-          placements={placements}
-          interactive={mode === "layout"}
-          accent={accent}
-          surface={surface}
-          attributeNames={attributeNames}
-          setEscape={setEscape}
-          apply={(update) => updateRoute(route, update)}
-          onAdd={(annotation) => {
-            props.onAnnotationAdd?.(annotation);
-            void notifyWebhook("annotation.add", { annotation });
-          }}
-          onUpdate={(annotation) => {
-            props.onAnnotationUpdate?.(annotation);
-            void notifyWebhook("annotation.update", { annotation });
-          }}
-          onDelete={(annotation) => {
-            props.onAnnotationDelete?.(annotation);
-            void notifyWebhook("annotation.delete", { annotation });
-          }}
-        />
-      )}
-      {active && mode === "annotate" && hover && !popup && !area && <Highlight target={hover} color={accent} />}
-      {active && multi && multi.elements.length > 0 && (
-        <MultiSelectOverlay rects={multi.elements.map(clientRect)} color={accent} />
-      )}
-      {active && area && <AreaOverlay region={area} color={accent} />}
-      {popup && (
-        <Popup
-          key={popup.mode === "edit" ? popup.annotation.id : `${popup.point.x},${popup.point.y}`}
-          element={popup.element}
-          selectedText={popup.selectedText}
-          initialComment={popup.mode === "edit" ? popup.annotation.comment : ""}
-          editing={popup.mode === "edit"}
-          allowEmpty={popup.allowEmpty}
-          accent={accent}
-          sourceFile={popup.mode === "edit" ? popup.annotation.sourceFile : popup.capture.sourceFile}
-          onOpenSource={props.onOpenSource}
-          point={popup.point}
-          closing={popup.closing}
-          shake={popup.shake}
-          onCancel={closePopup}
-          onDelete={() => {
-            if (popup.mode === "edit") deleteAnnotation(popup.annotation);
-            closePopup();
-          }}
-          onSubmit={(comment) => {
-            if (popup.mode === "edit") updateAnnotation(popup.annotation, comment);
-            else addAnnotation(popup.capture, comment, popup.target);
-            closePopup();
-          }}
-        />
-      )}
+            }}
+          />
+        )}
+        {active && (
+          <RulerLayer
+            surface={surface}
+            rulers={rulers}
+            drawAxis={mode === "measure-v" ? "y" : mode === "measure-h" ? "x" : null}
+            onAdd={(r) => setRulers((list) => [...list, r])}
+            onUpdate={(r) => setRulers((list) => list.map((item) => (item.id === r.id ? r : item)))}
+            onDelete={(id) => setRulers((list) => list.filter((item) => item.id !== id))}
+            setEscape={setEscape}
+          />
+        )}
+        {active && mode === "annotate" && hover && !popup && !area && <Highlight target={hover} color={accent} />}
+        {active && multi && multi.elements.length > 0 && (
+          <MultiSelectOverlay rects={multi.elements.map(clientRect)} color={accent} />
+        )}
+        {active && area && <AreaOverlay region={area} color={accent} />}
+        {popup && (
+          <Popup
+            key={popup.mode === "edit" ? popup.annotation.id : `${popup.point.x},${popup.point.y}`}
+            element={popup.element}
+            selectedText={popup.selectedText}
+            initialComment={popup.mode === "edit" ? popup.annotation.comment : ""}
+            editing={popup.mode === "edit"}
+            allowEmpty={popup.allowEmpty}
+            accent={accent}
+            sourceFile={popup.mode === "edit" ? popup.annotation.sourceFile : popup.capture.sourceFile}
+            onOpenSource={props.onOpenSource}
+            point={popup.point}
+            dockSide={dockSide}
+            closing={popup.closing}
+            shake={popup.shake}
+            onCancel={closePopup}
+            onDelete={() => {
+              if (popup.mode === "edit") deleteAnnotation(popup.annotation);
+              closePopup();
+            }}
+            onSubmit={(comment) => {
+              if (popup.mode === "edit") updateAnnotation(popup.annotation, comment);
+              else addAnnotation(popup.capture, comment, popup.target);
+              closePopup();
+            }}
+          />
+        )}
+      </div>
       <div data-annotate-dock="" data-dock-side={dockSide} className="pointer-events-none">
         {settingsPanel}
         {active ? (
@@ -909,10 +1023,17 @@ export function Annotate({
             onToggleFreeze={() => setFreeze(!frozen)}
             onCopy={() => void copy()}
             onClear={clearEverything}
-            onToggleSettings={() => setSettingsOpen((open) => !open)}
+            onToggleSettings={() =>
+              setSettingsOpen((open) => {
+                if (!open) setPopup(null);
+                return !open;
+              })
+            }
             onExit={deactivate}
             dragHandlers={dragHandlers}
+            theme={theme}
             dockSide={dockSide}
+            gooeyNav={settings.gooeyNav}
             onToggleDockSide={toggleDockSide}
             centerY={notchCenterY}
             dragging={notchDragging}

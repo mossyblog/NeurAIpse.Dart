@@ -139,5 +139,5 @@ test("R toggles Rearrange; C and X count rearrangements; S sends them", () => {
   assert.equal(resolveShortcut(key("c"), { ...state, rearrangeCount: 1 }), "copy");
   assert.equal(resolveShortcut(key("x"), { ...state, rearrangeCount: 1 }), "clear");
   assert.equal(resolveShortcut(key("s"), { ...state, rearrangeCount: 1 }), "send");
-  assert.equal(resolveShortcut(key("h"), { ...state, rearrangeCount: 1 }), null, "no markers to hide");
+  assert.equal(resolveShortcut(key("h"), { ...state, rearrangeCount: 1 }), "hide", "H toggles overlays anytime");
 });

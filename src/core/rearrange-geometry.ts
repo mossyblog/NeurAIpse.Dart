@@ -99,12 +99,22 @@ const edges = (r: Rect, axis: "x" | "y"): Edges =>
 export function snapRect(
   rect: Rect,
   targets: readonly Rect[],
-  options: { distance?: number; lines?: { x: (keyof Edges)[]; y: (keyof Edges)[] } } = {},
+  options: {
+    distance?: number;
+    lines?: { x: (keyof Edges)[]; y: (keyof Edges)[] };
+    /** Base grid step (px) to snap unsnapped axes to (e.g. 4 or 8). */
+    gridStep?: number;
+    /** Design-system spacing/gap token values (px) to snap sibling gaps to. */
+    gapSteps?: readonly number[];
+  } = {},
 ): { dx: number; dy: number; guides: SnapGuide[] } {
   const distance = options.distance ?? REARRANGE_SNAP;
   const lines = options.lines ?? { x: ["start", "mid", "end"], y: ["start", "mid", "end"] };
+  const gapSteps = options.gapSteps;
+  const gridStep = options.gridStep && options.gridStep > 0 ? options.gridStep : 0;
   const offset = { x: 0, y: 0 };
   for (const axis of ["x", "y"] as const) {
+    if (!lines[axis].length) continue;
     const own = edges(rect, axis);
     let best: number | null = null;
     for (const target of targets) {
@@ -115,8 +125,31 @@ export function snapRect(
           if (Math.abs(d) <= distance && (best == null || Math.abs(d) < Math.abs(best))) best = d;
         }
       }
+      // Also snap the gap between this box and a disjoint sibling to spacing/gap tokens.
+      if (gapSteps?.length) {
+        if (lines[axis].includes("start") && own.start >= t.end - distance) {
+          const gap = own.start - t.end;
+          for (const step of gapSteps) {
+            const d = step - gap;
+            if (Math.abs(d) <= distance && (best == null || Math.abs(d) < Math.abs(best))) best = d;
+          }
+        }
+        if (lines[axis].includes("end") && own.end <= t.start + distance) {
+          const gap = t.start - own.end;
+          for (const step of gapSteps) {
+            const d = gap - step;
+            if (Math.abs(d) <= distance && (best == null || Math.abs(d) < Math.abs(best))) best = d;
+          }
+        }
+      }
     }
-    if (best != null) offset[axis] = best;
+    if (best != null) {
+      offset[axis] = best;
+    } else if (gridStep > 0) {
+      // No sibling edge/gap matched: snap the leading (or dragged) edge to the grid step.
+      const anchor = lines[axis].includes("start") ? own.start : own[lines[axis][0]];
+      offset[axis] = Math.round(anchor / gridStep) * gridStep - anchor;
+    }
   }
   const snapped = { x: rect.x + offset.x, y: rect.y + offset.y, width: rect.width, height: rect.height };
   const guides: SnapGuide[] = [];

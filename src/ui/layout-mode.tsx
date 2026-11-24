@@ -21,7 +21,11 @@ import {
   type PlacementAnnotation,
   type ResizeHandle,
 } from "../core/layout-placement.ts";
+import { applyResizeSnap, resizeSnapLines, snapRect } from "../core/rearrange-geometry.ts";
+import { unionRect } from "../core/select.ts";
 import { isEditableElement } from "../core/shortcuts.ts";
+import { spacingTokens } from "../core/style-change.ts";
+import { readRootVars } from "../core/tokens-dom.ts";
 import type { Annotation, Point, Rect } from "../core/types.ts";
 import { FIELD_CLASS, PILL_CLASS, SURFACE_CLASS, ToolbarDivider } from "./chrome.tsx";
 import { LayoutPalette } from "./layout-palette.tsx";
@@ -33,6 +37,8 @@ export type LayoutModeProps = {
   placements: readonly PlacementAnnotation[];
   /** Layout mode is on: palette, drop, select, move, resize and keys. Off: outlines only. */
   interactive: boolean;
+  /** Show numbered marker and comment badges (hidden when overlay is collapsed for a clean preview). */
+  showChrome?: boolean;
   accent: string;
   surface: Surface;
   attributeNames: readonly string[];
@@ -103,8 +109,16 @@ function TextEditor({ initial, onDone }: { initial: string; onDone: (value: stri
  * `kind: "placement"` annotations. Placements live in document px (a page layer shifted
  * by the scroll, like markers) and stay visible as numbered outlines outside the mode.
  */
+const readGridSnapping = (): { gridStep: number; gapSteps: number[] } => {
+  const rootFontPx = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  const tokens = spacingTokens(readRootVars(document), rootFontPx);
+  const gapSteps = Array.from(new Set(tokens.map((t) => Math.round(t.px)).filter((px) => px > 0))).sort((a, b) => a - b);
+  const base = gapSteps.find((px) => px >= 4 && px <= 16);
+  return { gridStep: base ?? 8, gapSteps };
+};
+
 export function LayoutMode(props: LayoutModeProps) {
-  const { placements, interactive, surface, attributeNames, apply } = props;
+  const { placements, interactive, showChrome = true, surface, attributeNames, apply } = props;
   const [armed, setArmed] = useState<PaletteItem | null>(null);
   const [ghost, setGhost] = useState<Point | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
@@ -147,8 +161,16 @@ export function LayoutMode(props: LayoutModeProps) {
     return identifyElement(el ?? document.body, attributeNames);
   };
 
-  const drop = (item: PaletteItem, client: Point) => {
-    const rect = rectAround({ x: client.x + window.scrollX, y: client.y + window.scrollY }, item);
+  const otherPlacementRects = (excludeIds: readonly string[]): Rect[] =>
+    placements.filter((p) => !excludeIds.includes(p.id)).map((p) => placementRect(p, window.innerWidth));
+
+  const drop = (item: PaletteItem, client: Point, bypassSnap = false) => {
+    let rect = rectAround({ x: client.x + window.scrollX, y: client.y + window.scrollY }, item);
+    if (!bypassSnap) {
+      const { gridStep, gapSteps } = readGridSnapping();
+      const snap = snapRect(rect, otherPlacementRects([]), { gridStep, gapSteps });
+      rect = moveRect(rect, snap.dx, snap.dy);
+    }
     const placement = createPlacement({
       id: createId(),
       componentType: item.type,
@@ -224,11 +246,32 @@ export function LayoutMode(props: LayoutModeProps) {
 
   const rectFor = (p: PlacementAnnotation) => draft?.[p.id] ?? placementRect(p, viewportWidth);
 
-  const draftFrom = (g: Gesture, point: Point): Record<string, Rect> | null => {
-    const dx = point.x - g.start.x;
-    const dy = point.y - g.start.y;
-    if (g.kind === "move") return Object.fromEntries(Object.entries(g.origin).map(([id, r]) => [id, moveRect(r, dx, dy)]));
-    if (g.kind === "resize") return { [g.id]: resizeRect(g.origin, g.handle, dx, dy) };
+  const draftFrom = (g: Gesture, point: Point, bypassSnap = false): Record<string, Rect> | null => {
+    let dx = point.x - g.start.x;
+    let dy = point.y - g.start.y;
+    if (g.kind === "move") {
+      const ids = Object.keys(g.origin);
+      const movedRects = Object.values(g.origin).map((r) => moveRect(r, dx, dy));
+      if (!bypassSnap && movedRects.length > 0) {
+        const union = unionRect(movedRects);
+        if (union) {
+          const { gridStep, gapSteps } = readGridSnapping();
+          const snap = snapRect(union, otherPlacementRects(ids), { gridStep, gapSteps });
+          dx += snap.dx;
+          dy += snap.dy;
+        }
+      }
+      return Object.fromEntries(Object.entries(g.origin).map(([id, r]) => [id, moveRect(r, dx, dy)]));
+    }
+    if (g.kind === "resize") {
+      let next = resizeRect(g.origin, g.handle, dx, dy);
+      if (!bypassSnap) {
+        const { gridStep, gapSteps } = readGridSnapping();
+        const snap = snapRect(next, otherPlacementRects([g.id]), { lines: resizeSnapLines(g.handle), gridStep, gapSteps });
+        next = applyResizeSnap(next, g.handle, snap.dx, snap.dy);
+      }
+      return { [g.id]: next };
+    }
     return null;
   };
 
@@ -248,7 +291,7 @@ export function LayoutMode(props: LayoutModeProps) {
       setGhost(ghostAt);
       return;
     }
-    setDraft(draftFrom(g, point));
+    setDraft(draftFrom(g, point, event.altKey));
   });
 
   const onWindowUp = useEffectEvent((event: PointerEvent) => {
@@ -265,13 +308,13 @@ export function LayoutMode(props: LayoutModeProps) {
         setArmed(null);
         setGhost(null);
       } else {
-        drop(g.item, point);
+        drop(g.item, point, event.altKey);
       }
       return;
     }
     setDraft(null);
     if (!g.moved) return;
-    const rects = draftFrom(g, point);
+    const rects = draftFrom(g, point, event.altKey);
     if (rects) commitRects(rects);
   });
 
@@ -411,6 +454,9 @@ export function LayoutMode(props: LayoutModeProps) {
           const rect = rectFor(p);
           const isSelected = interactive && live.includes(p.id);
           const label = componentLabel(p.placement.componentType);
+          const markerInset = rect.x - window.scrollX < 32;
+          const actionsBelow = rect.y - window.scrollY < 44;
+          const actionsLeft = rect.x + rect.width - window.scrollX < 140;
           return (
             <div
               key={p.id}
@@ -460,16 +506,25 @@ export function LayoutMode(props: LayoutModeProps) {
                   }}
                 />
               )}
-              <span
-                aria-hidden
-                data-annotate-placement-marker={index + 1}
-                className="absolute top-0 right-full mr-2 flex size-6 items-center justify-center rounded-md font-mono text-[11px] font-semibold text-white tabular-nums shadow-sm ring-2 ring-background"
-                style={{ backgroundColor: props.accent, textShadow: "0 1px 1px rgba(0, 0, 0, 0.3)" }}
-              >
-                {index + 1}
-              </span>
-              {p.comment && (
-                <span aria-hidden data-annotate-placement-has-comment="" className={cn(PILL_CLASS, "absolute top-7 right-full mr-2 flex size-6 items-center justify-center")}>
+              {showChrome && (
+                <span
+                  aria-hidden
+                  data-annotate-placement-marker={index + 1}
+                  className={cn(
+                    "absolute flex size-6 items-center justify-center rounded-md font-mono text-[11px] font-semibold text-white tabular-nums shadow-sm ring-2 ring-background",
+                    markerInset ? "top-1.5 left-1.5" : "top-0 right-full mr-2",
+                  )}
+                  style={{ backgroundColor: props.accent, textShadow: "0 1px 1px rgba(0, 0, 0, 0.3)" }}
+                >
+                  {index + 1}
+                </span>
+              )}
+              {showChrome && p.comment && (
+                <span
+                  aria-hidden
+                  data-annotate-placement-has-comment=""
+                  className={cn(PILL_CLASS, "absolute flex size-6 items-center justify-center", markerInset ? "top-1.5 left-9" : "top-7 right-full mr-2")}
+                >
                   <MessageSquare className="size-3" />
                 </span>
               )}
@@ -479,18 +534,29 @@ export function LayoutMode(props: LayoutModeProps) {
                     <span
                       key={handle}
                       data-annotate-resize-handle={handle}
+                      aria-label={`Resize ${handle}`}
                       onPointerDown={(event) => {
                         if (event.button !== 0) return;
                         begin({ kind: "resize", start: { x: event.clientX, y: event.clientY }, id: p.id, handle, origin: placementRect(p, window.innerWidth), moved: false }, event);
                       }}
-                      className="pointer-events-auto absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-[3px] bg-background shadow-xs ring-2 transition-transform hover:scale-125"
-                      style={{ ...HANDLE_POSITION[handle], ["--tw-ring-color" as string]: props.accent }}
-                    />
+                      className="group pointer-events-auto absolute flex size-6 -translate-x-1/2 -translate-y-1/2 touch-none items-center justify-center"
+                      style={HANDLE_POSITION[handle]}
+                    >
+                      <span
+                        className="size-2.5 rounded-[3px] bg-background shadow-xs ring-2 transition-transform group-hover:scale-125"
+                        style={{ ["--tw-ring-color" as string]: props.accent }}
+                      />
+                    </span>
                   ))}
                   <div
                     data-annotate-placement-actions=""
                     onPointerDown={(event) => event.stopPropagation()}
-                    className={cn(SURFACE_CLASS, "pointer-events-auto absolute right-0 bottom-full mb-2 flex items-center gap-0.5 rounded-lg p-1")}
+                    className={cn(
+                      SURFACE_CLASS,
+                      "pointer-events-auto absolute flex items-center gap-0.5 rounded-lg p-1",
+                      actionsBelow ? "top-full mt-2" : "bottom-full mb-2",
+                      actionsLeft ? "left-0" : "right-0",
+                    )}
                   >
                     <Button variant="ghost" size="icon-xs" aria-label="Edit text" title="Edit text (double-click)" data-annotate-placement-action="text" onClick={() => setEditing(p.id)}>
                       <Type />

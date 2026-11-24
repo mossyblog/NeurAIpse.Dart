@@ -39,6 +39,7 @@ export function useShortcuts(options: ShortcutOptions) {
     }
     if (!options.active) return;
     if (event.key === "Escape") {
+      if (event.defaultPrevented) return;
       event.preventDefault();
       event.stopPropagation();
       options.onEscape();

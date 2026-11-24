@@ -10,6 +10,38 @@ export type MarkerClickBehavior = "edit" | "delete";
 
 export type DockSide = "right" | "left";
 
+export type GooeyNavPreset = "classic" | "accent" | "splash" | "calm" | "custom";
+export type GooeyNavSize = "sm" | "md" | "lg";
+
+export type GooeyNavSettings = {
+  /** Enable the WebGL2 gooey metaball selection effect on the notch mode bar. */
+  enabled: boolean;
+  /** Active React Bits preset or custom override. */
+  preset: GooeyNavPreset;
+  /** Pill color hex override (empty string uses the theme default). */
+  color: string;
+  /** Optional droplet tint palette hex strings. */
+  colors: string[];
+  /** Notch mode button size preset. */
+  size: GooeyNavSize;
+  /** Shows the frosted/solid notch frame around the toolbar. */
+  frame: boolean;
+  /** Shows the smooth WebGL2 hover pill behind hovered mode items. */
+  hoverEffect: boolean;
+  /** Transition duration in milliseconds (default 600). */
+  animationTime: number;
+  /** Number of liquid droplets emitted on mode switch (default 15). */
+  particleCount: number;
+  /** Droplet scatter spread in pixels (default 56). */
+  spread: number;
+  /** Random timing variance in milliseconds (default 300). */
+  timeVariance: number;
+  /** Metaball smooth-union blend factor in [0, 1] (default 0.5). */
+  gooeyness: number;
+  /** Spring wobble amount in [0, 1] (default 0.5). */
+  wobble: number;
+};
+
 export type CopyFormat = "markdown" | "source" | "classes" | { attribute: string };
 
 export type Annotation = {
@@ -98,6 +130,8 @@ export type Settings = {
   inspectorGuides: boolean;
   /** Viewport edge the side-notch annotation bar docks to. */
   dockSide: DockSide;
+  /** Gooey selection animation settings for the side-notch mode bar. */
+  gooeyNav: GooeyNavSettings;
 };
 
 export type Theme = "dark" | "light";

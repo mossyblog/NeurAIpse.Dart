@@ -44,6 +44,7 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 export type RearrangeOverlayProps = {
   color: string;
   boxes: OverlayBox[];
+  selectedCount: number;
   hover: { rect: Rect; name: string } | null;
   guides: SnapGuide[];
   lines: MeasureLine[];
@@ -73,19 +74,19 @@ export function RearrangeOverlay(props: RearrangeOverlayProps) {
       {props.hover && (
         <div
           data-annotate-rearrange-hover
-          className="fixed rounded-[3px] border border-dashed"
+          className="fixed rounded-[4px] border border-dashed"
           style={{ ...box(props.hover.rect), borderColor: color, backgroundColor: `color-mix(in oklch, ${color} 6%, transparent)` }}
         />
       )}
       {props.boxes.map((b) => (
         <div key={b.key}>
           {b.ghost && (
-            <div data-annotate-rearrange-ghost className="fixed rounded-[3px] border border-dashed border-muted-foreground/60" style={box(b.ghost)} />
+            <div data-annotate-rearrange-ghost className="fixed rounded-[4px] border border-dashed border-muted-foreground/60" style={box(b.ghost)} />
           )}
           <div
             data-annotate-rearrange-box={b.selected ? "selected" : "changed"}
             data-annotate-rearrange-removed={b.removed || undefined}
-            className="fixed rounded-[3px] border-2"
+            className="fixed rounded-[4px] border-2"
             style={{
               ...box(b.rect),
               borderColor: b.removed ? "var(--destructive)" : color,
@@ -102,6 +103,7 @@ export function RearrangeOverlay(props: RearrangeOverlayProps) {
             </span>
           )}
           {b.selected &&
+            props.selectedCount === 1 &&
             REARRANGE_HANDLES.map((handle) => {
               const p = handlePoint(b.rect, handle);
               return (
@@ -138,13 +140,13 @@ export function RearrangeOverlay(props: RearrangeOverlayProps) {
           onPointerDown={props.onGripDown}
         >
           <Move aria-hidden className="size-3.5 shrink-0" />
-          <span className="max-w-44 truncate">{firstSelected.name}</span>
+          <span className="max-w-44 truncate">{props.selectedCount > 1 ? `${props.selectedCount} elements` : firstSelected.name}</span>
         </button>
       )}
       {props.marquee && (
         <div
           data-annotate-rearrange-marquee
-          className="fixed rounded-[3px] border border-dashed"
+          className="fixed rounded-[4px] border border-dashed"
           style={{ ...box(props.marquee), borderColor: color, backgroundColor: `color-mix(in oklch, ${color} 8%, transparent)` }}
         />
       )}

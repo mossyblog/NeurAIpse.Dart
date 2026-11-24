@@ -182,7 +182,7 @@ test("standalone Annotate mounts self-contained Shadow DOM UI, opens toolbar, an
     "Annotate",
     "Spacing inspector",
     "Type inspector",
-    "Colour inspector",
+    "Color inspector",
     "Layout",
     "Rearrange",
   ]) {
@@ -277,6 +277,145 @@ test("standalone Annotate mounts self-contained Shadow DOM UI, opens toolbar, an
     grip.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true, button: 0, clientX: 120, clientY: 320 }));
   });
   assert.equal(notch.getAttribute("data-dock-side"), "left", "dragging across viewport snaps notch to left side");
+
+  // Switching modes updates the ported WebGL2 GooeyNav canvas & active mode indicator.
+  const gooeyNav = notch.querySelector("[data-gooey-nav]");
+  const gooeyCanvas = notch.querySelector("[data-gooey-canvas]");
+  assert.ok(gooeyNav && gooeyCanvas, "mode group renders WebGL2 GooeyNav canvas");
+  assert.equal(gooeyNav.getAttribute("data-gooey-enabled"), "true");
+  assert.equal(gooeyNav.getAttribute("data-gooey-active"), "annotate");
+  await act(async () => {
+    spacingBtn.click();
+  });
+  assert.equal(gooeyNav.getAttribute("data-gooey-active"), "spacing");
+
+  // Opening Settings -> Gooey selection opens the React Bits Customize sheet with all 12 controls.
+  const settingsBtn = toolbar.querySelector('button[aria-label="Settings"]');
+  assert.ok(settingsBtn, "settings button exists on notch");
+  if (!shadow.querySelector("[data-open-notch-sheet]")) {
+    await act(async () => {
+      settingsBtn.click();
+    });
+  }
+  const openSheetBtn = shadow.querySelector("[data-open-notch-sheet]");
+  assert.ok(openSheetBtn, "settings panel includes trigger to open Notch & Gooey Nav sheet");
+  await act(async () => {
+    openSheetBtn.click();
+  });
+  const sheet = shadow.querySelector("[data-annotate-notch-sheet]");
+  assert.ok(sheet, "Notch & Gooey Nav Customize sheet opens");
+  for (const key of [
+    "preset",
+    "color",
+    "size",
+    "particleCount",
+    "spread",
+    "animationTime",
+    "timeVariance",
+    "gooeyness",
+    "wobble",
+    "frame",
+    "hoverEffect",
+    "enabled",
+  ]) {
+    assert.ok(sheet.querySelector(`[data-gooey-control="${key}"]`), `sheet exposes "${key}" control`);
+  }
+
+  // Selecting Accent preset updates pill color to #ff5a1f.
+  const presetBtn = sheet.querySelector('[data-gooey-control="preset"]');
+  await act(async () => {
+    presetBtn.click();
+  });
+  const accentOpt = sheet.querySelector('[data-option-value="accent"]');
+  assert.ok(accentOpt, "preset dropdown exposes Accent option");
+  await act(async () => {
+    accentOpt.click();
+  });
+  const colorInput = sheet.querySelector('input[data-gooey-control="color"]');
+  assert.equal(colorInput.value, "#ff5a1f");
+
+  // Reset restores defaults, ArrowRight increments Particle Count, Frame switch updates notch attribute.
+  const resetBtn = sheet.querySelector("[data-gooey-reset]");
+  await act(async () => {
+    resetBtn.click();
+  });
+  const particleSlider = sheet.querySelector('[data-gooey-control="particleCount"]');
+  assert.equal(particleSlider.getAttribute("aria-valuenow"), "15");
+  await act(async () => {
+    particleSlider.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+  });
+  assert.equal(particleSlider.getAttribute("aria-valuenow"), "16");
+
+  const frameSwitch = sheet.querySelector('[data-gooey-control="frame"]');
+  await act(async () => {
+    frameSwitch.click();
+  });
+  assert.equal(notch.getAttribute("data-gooey-frame"), "false");
+
+  // Modifying a feel slider switches the Preset label to "Custom".
+  assert.ok(presetBtn.textContent.includes("Custom"), `expected Preset to display "Custom", got "${presetBtn.textContent}"`);
+
+  // Escape dismisses innermost-first: open dropdown -> Customize sheet -> Settings panel -> mode.
+  await act(async () => {
+    presetBtn.click();
+  });
+  assert.ok(sheet.querySelector('[role="listbox"]'), "preset dropdown opens");
+  await act(async () => {
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  assert.equal(sheet.querySelector('[role="listbox"]'), null, "first Escape closes open scrubber dropdown");
+  assert.ok(shadow.querySelector("[data-annotate-notch-sheet]"), "Customize sheet remains open after closing dropdown");
+
+  await act(async () => {
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  assert.equal(shadow.querySelector("[data-annotate-notch-sheet]"), null, "second Escape closes Customize sheet back to MainView");
+  assert.ok(shadow.querySelector("[data-annotate-settings-popover]"), "Settings panel remains open after closing Customize sheet");
+
+  await act(async () => {
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  assert.equal(shadow.querySelector("[data-annotate-settings-popover]"), null, "third Escape closes Settings panel");
+  assert.equal(gooeyNav.getAttribute("data-gooey-active"), "spacing", "active mode preserved while dismissing Settings");
+
+  // Re-open Settings -> Customize to verify Reset and the real Close settings X button.
+  await act(async () => {
+    settingsBtn.click();
+  });
+  await act(async () => {
+    shadow.querySelector("[data-open-notch-sheet]").click();
+  });
+  const sheet2 = shadow.querySelector("[data-annotate-notch-sheet]");
+  const resetBtn2 = sheet2.querySelector("[data-gooey-reset]");
+  const particleSlider2 = sheet2.querySelector('[data-gooey-control="particleCount"]');
+  await act(async () => {
+    resetBtn2.click();
+  });
+  assert.equal(particleSlider2.getAttribute("aria-valuenow"), "15");
+  assert.equal(notch.getAttribute("data-gooey-frame"), "true");
+
+  const closeSheetBtn = sheet2.querySelector('button[aria-label="Close settings"]');
+  assert.ok(closeSheetBtn);
+  await act(async () => {
+    closeSheetBtn.click();
+  });
+  assert.equal(shadow.querySelector("[data-annotate-notch-sheet]"), null, "sheet closes cleanly");
+  assert.equal(shadow.querySelector("[data-annotate-settings-popover]"), null, "X closes entire Settings panel");
+
+  // NotchDockButton avoids duplicate native title tooltips, Exit advertises Esc shortcut.
+  assert.equal(exitBtn.getAttribute("title"), null, "dock buttons omit native title to avoid double tooltips");
+  assert.equal(exitBtn.getAttribute("aria-keyshortcuts"), "Esc", "Exit button advertises Esc shortcut");
+
+  // Outside click dismisses Settings without triggering page picking.
+  await act(async () => {
+    settingsBtn.click();
+  });
+  assert.ok(shadow.querySelector("[data-annotate-settings-popover]"));
+  await act(async () => {
+    dom.window.document.body.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    dom.window.document.body.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0 }));
+  });
+  assert.equal(shadow.querySelector("[data-annotate-settings-popover]"), null, "outside click dismisses Settings");
 
   // Exiting returns to the collapsed Apple side notch launcher on the chosen side.
   await act(async () => {

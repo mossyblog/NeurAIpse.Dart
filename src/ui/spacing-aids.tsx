@@ -258,8 +258,16 @@ export function SpacingAids({ handles, guides, drag, steps, events }: SpacingAid
                 className={cn(PILL_CLASS, "fixed px-1.5 py-0.5 font-mono text-[10px] leading-none whitespace-nowrap tabular-nums")}
                 style={
                   meta.axis === "y"
-                    ? { left: Math.min(viewport.width - 100, meta.cross[1] + 6), top: labelled.pos - 8, zIndex: Z_GUIDE }
-                    : { left: Math.min(viewport.width - 100, labelled.pos + 6), top: Math.max(8, meta.cross[0] - 18), zIndex: Z_GUIDE }
+                    ? {
+                        left: Math.max(8, Math.min(viewport.width - 100, meta.cross[1] + 6)),
+                        top: Math.max(8, Math.min(viewport.height - 24, labelled.pos - 8)),
+                        zIndex: Z_GUIDE,
+                      }
+                    : {
+                        left: Math.max(8, Math.min(viewport.width - 100, labelled.pos + 6)),
+                        top: Math.max(8, Math.min(viewport.height - 24, meta.cross[0] - 18)),
+                        zIndex: Z_GUIDE,
+                      }
                 }
               >
                 {`${stepLabel(meta.property, labelled.token || undefined) ?? "no token"} · ${labelled.px}`}
@@ -275,7 +283,7 @@ export function SpacingAids({ handles, guides, drag, steps, events }: SpacingAid
         <span
           data-annotate-layer="handle"
           data-annotate-drag-label
-          className="fixed rounded px-1.5 py-0.5 font-mono text-[11px] leading-4 font-medium whitespace-nowrap text-white tabular-nums"
+          className="fixed rounded-[4px] px-1.5 py-0.5 font-mono text-[11px] leading-4 font-medium whitespace-nowrap text-white tabular-nums"
           style={{
             left: Math.max(8, Math.min(viewport.width - 180, active.x + (drag.axis === "y" ? HIT : 0))),
             top: Math.max(8, Math.min(viewport.height - 28, active.y - (drag.axis === "x" ? HIT : 8))),

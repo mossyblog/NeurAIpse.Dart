@@ -77,6 +77,26 @@ export function trackingTokens(vars: Vars, fontPx: number, rootFontPx = 16): Pic
   return out.sort((a, b) => (a.px ?? 0) - (b.px ?? 0));
 }
 
+export function radiusTokens(vars: Vars, rootFontPx = 16): PickerToken[] {
+  const out: PickerToken[] = [];
+  for (const [name, value] of Object.entries(vars)) {
+    if (!/^--(radius|rounded)(-[\w-]+)?$/.test(name)) continue;
+    const px = lengthPx(value, { rootFontPx });
+    if (px != null && px >= 0) out.push({ token: name, css: `var(${name})`, px: Math.round(px * 100) / 100 });
+  }
+  return out.sort((a, b) => (a.px ?? 0) - (b.px ?? 0));
+}
+
+export function borderWidthTokens(vars: Vars, rootFontPx = 16): PickerToken[] {
+  const out: PickerToken[] = [];
+  for (const [name, value] of Object.entries(vars)) {
+    if (!/^--(border-width|stroke-width|stroke)(-[\w-]+)?$/.test(name)) continue;
+    const px = lengthPx(value, { rootFontPx });
+    if (px != null && px >= 0) out.push({ token: name, css: `var(${name})`, px: Math.round(px * 100) / 100 });
+  }
+  return out.sort((a, b) => (a.px ?? 0) - (b.px ?? 0));
+}
+
 /**
  * Colour tokens: `--color-*` first, then any other custom property whose value is a
  * colour (with `@theme inline`, Tailwind utilities reference `--card`, `--primary`...

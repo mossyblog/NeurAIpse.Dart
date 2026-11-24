@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { getElementClasses, getElementPath, identifyElement } from "../core/identify.ts";
 import type { MeasureLine } from "../core/measure.ts";
 import {
@@ -29,6 +29,8 @@ import { createRearrangePreview, REARRANGE_ID_ATTRIBUTE, type RearrangeTarget } 
 import { pickAreaTargets, unionRect } from "../core/select.ts";
 import { isEditableElement } from "../core/shortcuts.ts";
 import { deepElementFromPoint } from "../core/spacing-dom.ts";
+import { spacingTokens } from "../core/style-change.ts";
+import { readRootVars } from "../core/tokens-dom.ts";
 import type { Annotation, Point, Rect } from "../core/types.ts";
 import { RearrangeOverlay, type OverlayBox } from "./rearrange-overlay.tsx";
 import { RearrangePanel, type RearrangeRow } from "./rearrange-panel.tsx";
@@ -38,15 +40,125 @@ import { isFromSurface, realTarget, type Surface } from "./shadow-surface.ts";
  * Rearrange mode (parity spec 10.2): select existing page elements, move them (drag the
  * selection or its grip, arrow keys), resize them (8 handles), hide them (Delete), with
  * snap guides and distance pills. Each touched element is one `kind: "rearrange"`
- * annotation kept with the feedback for the route; the preview lives only while the mode
- * is on and is fully reverted when it ends.
+ * annotation kept with the feedback for the route; its live DOM preview is managed by
+ * `useRearrangePreview` at the `<Annotate />` root so rearrangements persist across mode
+ * switches and overlay hide until explicitly cleared, reset, or `<Annotate />` unmounts.
  */
+
+export type RearrangeLogical = { rect: Rect; original: Rect };
+
+export type RearrangePreviewApi = {
+  live: Map<string, Element>;
+  elementFor: (a: Annotation) => Element | null;
+  attach: (list: readonly Annotation[]) => string[];
+  setDraft: (draft: Map<Element, RearrangeLogical> | undefined) => void;
+};
+
+/**
+ * Owns the live rearrange preview `<style>` and element map at `<Annotate />` level so
+ * moved/resized/hidden elements stay live across mode switches and overlay hide, and
+ * revert cleanly on Clear, Reset, or `<Annotate />` unmount.
+ */
+export function useRearrangePreview(annotations: Annotation[]): RearrangePreviewApi {
+  const [live] = useState(() => new Map<string, Element>());
+  const [preview] = useState(() => (typeof document === "undefined" ? null : createRearrangePreview(document)));
+  const draftRef = useRef<Map<Element, RearrangeLogical> | undefined>(undefined);
+  const latestAnnotations = useRef<Annotation[]>(annotations);
+  useEffect(() => {
+    latestAnnotations.current = annotations;
+  });
+
+  const api = useMemo<RearrangePreviewApi>(() => {
+    const elementFor = (a: Annotation): Element | null => {
+      const el = live.get(a.id);
+      return el && el.isConnected ? el : null;
+    };
+
+    const attach = (list: readonly Annotation[]): string[] => {
+      const missing: string[] = [];
+      for (const a of rearrangeItems(list)) {
+        if (elementFor(a)) continue;
+        let found: Element | null = null;
+        try {
+          const matches = document.querySelectorAll(a.rearrange!.selector);
+          if (matches.length === 1) found = matches[0];
+        } catch {
+          found = null;
+        }
+        if (found) live.set(a.id, found);
+        else missing.push(a.id);
+      }
+      return missing;
+    };
+
+    const targetsFor = (list: readonly Annotation[], draft?: Map<Element, RearrangeLogical>): RearrangeTarget[] => {
+      const out = new Map<Element, RearrangeTarget>();
+      const add = (element: Element, original: Rect, rect: Rect, removed: boolean) => {
+        const resized = Math.round(rect.width) !== Math.round(original.width) || Math.round(rect.height) !== Math.round(original.height);
+        out.set(element, {
+          element,
+          offset: { x: rect.x - original.x, y: rect.y - original.y },
+          ...(resized ? { size: { width: rect.width, height: rect.height } } : {}),
+          ...(removed ? { removed: true } : {}),
+        });
+      };
+      for (const a of rearrangeItems(list)) {
+        const el = elementFor(a);
+        if (el) add(el, a.rearrange!.originalRect, a.rearrange!.currentRect, Boolean(a.rearrangeDetail?.removed));
+      }
+      for (const [el, logical] of draft ?? []) add(el, logical.original, logical.rect, false);
+      return [...out.values()];
+    };
+
+    const setDraft = (draft: Map<Element, RearrangeLogical> | undefined) => {
+      if (draft === draftRef.current) return;
+      draftRef.current = draft;
+      if (!preview) return;
+      const list = latestAnnotations.current;
+      attach(list);
+      preview.apply(targetsFor(list, draft));
+    };
+
+    return { live, elementFor, attach, setDraft };
+  }, [live, preview]);
+
+  useEffect(() => {
+    if (!preview) return;
+    const ids = new Set(rearrangeItems(annotations).map((a) => a.id));
+    for (const id of Array.from(live.keys())) {
+      if (!ids.has(id)) live.delete(id);
+    }
+    api.attach(annotations);
+    const out = new Map<Element, RearrangeTarget>();
+    const add = (element: Element, original: Rect, rect: Rect, removed: boolean) => {
+      const resized = Math.round(rect.width) !== Math.round(original.width) || Math.round(rect.height) !== Math.round(original.height);
+      out.set(element, {
+        element,
+        offset: { x: rect.x - original.x, y: rect.y - original.y },
+        ...(resized ? { size: { width: rect.width, height: rect.height } } : {}),
+        ...(removed ? { removed: true } : {}),
+      });
+    };
+    for (const a of rearrangeItems(annotations)) {
+      const el = api.elementFor(a);
+      if (el) add(el, a.rearrange!.originalRect, a.rearrange!.currentRect, Boolean(a.rearrangeDetail?.removed));
+    }
+    for (const [el, logical] of draftRef.current ?? []) add(el, logical.original, logical.rect, false);
+    preview.apply([...out.values()]);
+  }, [preview, annotations, live, api]);
+
+  useEffect(() => () => preview?.revert(), [preview]);
+
+  return api;
+}
 
 export type RearrangeContext = {
   surface: Surface;
   attributeNames: readonly string[];
   annotations: Annotation[];
   commit: (list: Annotation[]) => void;
+  /** Persistent preview controller owned by `<Annotate />`. */
+  rearrangePreview: RearrangePreviewApi;
   /** Selection accent (marker colour). */
   color: string;
   sourceFor?: (el: Element) => string | undefined;
@@ -62,7 +174,7 @@ export type RearrangeContext = {
 const BLOCKED = ["mousedown", "mouseup", "click", "dblclick", "auxclick", "contextmenu", "dragstart", "selectstart"] as const;
 const SKIPPED = new Set(["html", "body", "head", "script", "style", "link", "meta", "noscript", "template", "br"]);
 
-type Logical = { rect: Rect; original: Rect };
+type Logical = RearrangeLogical;
 
 type Gesture =
   | { kind: "press"; start: Point; target: Element | null; additive: boolean; onSelected: boolean }
@@ -87,6 +199,14 @@ const viewRect = (el: Element): Rect => {
   const b = el.getBoundingClientRect();
   return { x: b.left, y: b.top, width: b.width, height: b.height };
 };
+
+function readGridSnapping(): { gridStep: number; gapSteps: number[] } {
+  const rootFontPx = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  const tokens = spacingTokens(readRootVars(document), rootFontPx);
+  const gapSteps = Array.from(new Set(tokens.map((t) => Math.round(t.px)).filter((px) => px > 0))).sort((a, b) => a - b);
+  const base = gapSteps.find((px) => px >= 4 && px <= 16);
+  return { gridStep: base ?? 8, gapSteps };
+}
 
 /** `.card-btn` from the first class, else `#id`, else the tag (sibling and parent labels). */
 function shortLabel(el: Element): string {
@@ -139,10 +259,8 @@ function afterLayout(before: Record<string, string>, original: Rect, rect: Rect,
 const isRecord = (a: Annotation) => a.kind === "rearrange" && Boolean(a.rearrange);
 
 export function RearrangeMode({ ctx }: { ctx: RearrangeContext }) {
-  const { surface } = ctx;
-  /** Live element per record id; held in state (not a ref) so render may read it. */
-  const [live] = useState(() => new Map<string, Element>());
-  const [preview] = useState(() => createRearrangePreview(document));
+  const { surface, rearrangePreview } = ctx;
+  const { live, elementFor, attach, setDraft } = rearrangePreview;
   /** Gesture in progress (pointer handlers only; never read in render). */
   const gesture = useRef<Gesture | null>(null);
   const [selection, setSelection] = useState<Element[]>([]);
@@ -155,59 +273,19 @@ export function RearrangeMode({ ctx }: { ctx: RearrangeContext }) {
   const records = rearrangeItems(ctx.annotations);
   const isOverlay = (el: Element) => el === surface.host || el.getRootNode() === surface.shadow;
 
-  const elementFor = (a: Annotation): Element | null => {
-    const el = live.get(a.id);
-    return el && el.isConnected ? el : null;
-  };
   const recordFor = (el: Element): Annotation | undefined => working.current.find((a) => isRecord(a) && live.get(a.id) === el);
-
-  /** Re-attaches stored selectors (after a reload): exactly one match, else not found. */
-  const attach = (list: readonly Annotation[]): string[] => {
-    const missing: string[] = [];
-    for (const a of rearrangeItems(list)) {
-      if (elementFor(a)) continue;
-      let found: Element | null = null;
-      try {
-        const matches = document.querySelectorAll(a.rearrange!.selector);
-        if (matches.length === 1) found = matches[0];
-      } catch {
-        found = null;
-      }
-      if (found) live.set(a.id, found);
-      else missing.push(a.id);
-    }
-    return missing;
-  };
-
-  const targetsFor = (list: readonly Annotation[], draft?: Map<Element, Logical>): RearrangeTarget[] => {
-    const out = new Map<Element, RearrangeTarget>();
-    const add = (element: Element, original: Rect, rect: Rect, removed: boolean) => {
-      const resized = Math.round(rect.width) !== Math.round(original.width) || Math.round(rect.height) !== Math.round(original.height);
-      out.set(element, { element, offset: { x: rect.x - original.x, y: rect.y - original.y }, ...(resized ? { size: { width: rect.width, height: rect.height } } : {}), ...(removed ? { removed: true } : {}) });
-    };
-    for (const a of rearrangeItems(list)) {
-      const el = elementFor(a);
-      if (el) add(el, a.rearrange!.originalRect, a.rearrange!.currentRect, Boolean(a.rearrangeDetail?.removed));
-    }
-    for (const [el, logical] of draft ?? []) add(el, logical.original, logical.rect, false);
-    return [...out.values()];
-  };
 
   const redraw = () => requestAnimationFrame(() => setTick((t) => t + 1));
 
-  // The preview follows the records and the drag draft; unmount reverts it fully.
+  // Sync transient drag draft into the persistent preview; unmount only clears an in-flight draft.
   const draft = view?.draft;
-  const syncPreview = useEffectEvent((list: Annotation[], next: Map<Element, Logical> | undefined) => {
-    working.current = list;
-    attach(list);
-    preview.apply(targetsFor(list, next));
-  });
   useEffect(() => {
-    syncPreview(ctx.annotations, draft);
+    working.current = ctx.annotations;
+    setDraft(draft);
     const frame = requestAnimationFrame(() => setTick((t) => t + 1));
     return () => cancelAnimationFrame(frame);
-  }, [ctx.annotations, draft]);
-  useEffect(() => () => preview.revert(), [preview]);
+  }, [ctx.annotations, draft, setDraft]);
+  useEffect(() => () => setDraft(undefined), [setDraft]);
 
   // Entering the mode: report stored rearrangements whose element is gone.
   const reportMissing = useEffectEvent(() => {
@@ -392,7 +470,12 @@ export function RearrangeMode({ ctx }: { ctx: RearrangeContext }) {
       let moved = translateRect(g.union, dx, dy);
       let guides: SnapGuide[] = [];
       if (!event.altKey) {
-        const snap = snapRect(moved, g.targets, { lines: { x: event.shiftKey && dx === 0 ? [] : ["start", "mid", "end"], y: event.shiftKey && dy === 0 ? [] : ["start", "mid", "end"] } });
+        const { gridStep, gapSteps } = readGridSnapping();
+        const snap = snapRect(moved, g.targets, {
+          lines: { x: event.shiftKey && dx === 0 ? [] : ["start", "mid", "end"], y: event.shiftKey && dy === 0 ? [] : ["start", "mid", "end"] },
+          gridStep,
+          gapSteps,
+        });
         dx += snap.dx;
         dy += snap.dy;
         moved = translateRect(g.union, dx, dy);
@@ -406,7 +489,8 @@ export function RearrangeMode({ ctx }: { ctx: RearrangeContext }) {
     let visual = resizeFromHandle(g.visual, g.handle, dx, dy, { keepAspect: event.shiftKey });
     let guides: SnapGuide[] = [];
     if (!event.altKey && !event.shiftKey) {
-      const snap = snapRect(visual, g.targets, { lines: resizeSnapLines(g.handle) });
+      const { gridStep, gapSteps } = readGridSnapping();
+      const snap = snapRect(visual, g.targets, { lines: resizeSnapLines(g.handle), gridStep, gapSteps });
       visual = applyResizeSnap(visual, g.handle, snap.dx, snap.dy);
       guides = snap.guides;
     }
@@ -568,13 +652,9 @@ export function RearrangeMode({ ctx }: { ctx: RearrangeContext }) {
   const boxFor = (el: Element, selected: boolean): OverlayBox => {
     const logical = view?.draft.get(el);
     const record = recordOf.get(el);
-    let rect = viewRect(el);
-    if (logical) {
-      // Drafted boxes follow the drag exactly (the preview lands a frame later).
-      const base = record?.rearrange ?? null;
-      const from = base ? base.currentRect : logical.original;
-      rect = { x: rect.x + (logical.rect.x - from.x), y: rect.y + (logical.rect.y - from.y), width: logical.rect.width, height: logical.rect.height };
-    }
+    // While dragging, logical.rect is already the exact target document rect (avoids double-applying
+    // the drag delta once the preview translate has flushed to the DOM).
+    const rect = logical ? toView(logical.rect) : viewRect(el);
     const original = record?.rearrange?.originalRect ?? logical?.original;
     const current = logical?.rect ?? record?.rearrange?.currentRect;
     const ghost = original && current && !sameRect(original, current)
@@ -605,6 +685,7 @@ export function RearrangeMode({ ctx }: { ctx: RearrangeContext }) {
       <RearrangeOverlay
         color={ctx.color}
         boxes={boxes}
+        selectedCount={selection.length}
         hover={hoverBox}
         guides={view?.guides ?? []}
         lines={view?.lines ?? []}
