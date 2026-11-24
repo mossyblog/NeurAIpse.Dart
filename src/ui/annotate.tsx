@@ -53,6 +53,7 @@ import { Popup } from "./popup.tsx";
 import { AreaOverlay, MultiSelectOverlay } from "./selection-overlay.tsx";
 import { SettingsPanel } from "./settings-panel.tsx";
 import { ColorInspector } from "./color-inspector.tsx";
+import { DesignMode } from "./design-mode.tsx";
 import { pendingItems, type InspectorContext } from "./inspector-context.ts";
 import { SpacingInspector } from "./spacing-inspector.tsx";
 import { TypeInspector } from "./type-inspector.tsx";
@@ -607,6 +608,10 @@ export function Annotate({
     const target = annotations.find((a) => a.id === id);
     const category = target?.styleChange?.category;
     if (!category) return;
+    if (mode === "design") {
+      setFocus((current) => ({ id, n: (current?.n ?? 0) + 1 }));
+      return;
+    }
     const next: ToolMode = category === "spacing" ? "spacing" : category === "typography" ? "type" : "color";
     if (next !== mode) selectMode(next);
     // Editing a spacing change needs the region panel, which lives in Box.
@@ -899,8 +904,7 @@ export function Annotate({
             onSelect={onMarkerSelect}
           />
         )}
-        {/* TODO(wave-2): swap in <DesignMode /> */}
-        {active && mode === "design" && <SpacingInspector key={subMode} ctx={inspectorCtx} />}
+        {active && mode === "design" && <DesignMode ctx={inspectorCtx} />}
         {active && mode === "spacing" && <SpacingInspector key={subMode} ctx={inspectorCtx} />}
         {active && mode === "type" && <TypeInspector ctx={inspectorCtx} />}
         {active && mode === "color" && <ColorInspector ctx={inspectorCtx} />}

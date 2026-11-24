@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Badge, Button } from "./primitives.tsx";
 import { cn } from "cn";
-import { Check, ChevronDown, ChevronUp, Copy, Pencil, Pipette, Ruler, Trash2, Type, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Copy, Pencil, Pipette, Ruler, SlidersHorizontal, Trash2, Type, X } from "lucide-react";
 import { FIELD_CLASS, FloatingPanel } from "./chrome.tsx";
 
 /** One row of the shared pending list (all inspector categories, spec 6 mock-up). */
@@ -13,7 +13,7 @@ export type PanelFrameProps = {
   /** Accessible name, e.g. "Spacing inspector". */
   label: string;
   /** Data attribute marking the panel kind (`data-annotate-spacing-panel`...). */
-  kind: "spacing" | "type" | "color";
+  kind: "design" | "spacing" | "type" | "color";
   elementName: string;
   regionLabel: string;
   /** Element count badge (groups). */
@@ -37,6 +37,7 @@ const FLAG_CLASS: Record<FlagKind, string> = {
 };
 
 const PANEL_META: Record<PanelFrameProps["kind"], { label: string; icon: ReactNode }> = {
+  design: { label: "Design", icon: <SlidersHorizontal className="size-3.5" /> },
   spacing: { label: "Spacing", icon: <Ruler className="size-3.5" /> },
   type: { label: "Type", icon: <Type className="size-3.5" /> },
   color: { label: "Colour", icon: <Pipette className="size-3.5" /> },
