@@ -45,8 +45,8 @@ import {
   RulerDimensionLine,
   Send,
   Settings,
+  SlidersHorizontal,
   Trash2,
-  Type,
   X,
 } from "lucide-react";
 import {
@@ -59,9 +59,17 @@ import {
 } from "./chrome.tsx";
 import type { DragPointerHandlers } from "./use-drag-position.ts";
 
-type ToolMode = "annotate" | "spacing" | "type" | "color" | "layout" | "rearrange" | "measure-v" | "measure-h";
+type ToolMode = "annotate" | "design" | "spacing" | "type" | "color" | "layout" | "rearrange" | "measure-v" | "measure-h";
+type PrimaryMode = "annotate" | "design" | "measure";
 
-const MODE_ORDER: readonly ToolMode[] = ["annotate", "spacing", "type", "color", "layout", "rearrange"];
+const MODE_ORDER: readonly PrimaryMode[] = ["annotate", "design", "measure"];
+
+function toPrimaryMode(mode: ToolMode): PrimaryMode {
+  if (mode === "annotate") return "annotate";
+  if (mode === "measure-v" || mode === "measure-h" || mode === "spacing") return "measure";
+  return "design";
+}
+
 const GOOEY_PILLS: Record<Theme, { color: string; hover: string; shadow: number }> = {
   dark: { color: "#f4f4f5", hover: "rgba(255, 255, 255, 0.08)", shadow: 0.4 },
   light: { color: "#27272a", hover: "rgba(24, 24, 27, 0.06)", shadow: 0.2 },
@@ -73,7 +81,7 @@ const NOTCH_SIZES: Record<GooeyNavSize, { baseSize: number; maxSize: number; slo
   lg: { baseSize: 28, maxSize: 48, slotPitch: 32 },
 };
 
-const TOTAL_DOCK_ITEMS = 14;
+const TOTAL_DOCK_ITEMS = 11;
 const SPRING_RATE = 24;
 
 function syntheticOffset(index: number, slotPitch = DOCK_SLOT_PITCH): number {
@@ -289,19 +297,21 @@ export type ToolbarProps = {
   notchRef?: Ref<HTMLDivElement>;
 };
 
-const SUB_MODES: { value: InspectorSubMode; label: string; title: string }[] = [
-  { value: "box", label: "Box", title: "Box: margin, padding and gap regions" },
-  { value: "lines", label: "Lines", title: "Lines: guides and measure" },
+const DESIGN_SUB_MODES: { value: "design" | "rearrange" | "layout"; label: string; shortcut: string; title: string }[] = [
+  { value: "design", label: "Inspect", shortcut: "D", title: "Inspect & edit layer styles (D)" },
+  { value: "rearrange", label: "Move", shortcut: "R", title: "Move & resize elements (R)" },
+  { value: "layout", label: "Wireframe", shortcut: "L", title: "Place wireframe components (L)" },
 ];
 
 const MODE_META: Record<Exclude<ToolMode, "annotate">, { label: string; dot: string; hint?: string }> = {
-  spacing: { label: "Spacing", dot: "bg-[var(--annotate-marker-green)]" },
+  design: { label: "Design", dot: "bg-[var(--annotate-marker-purple)]" },
+  spacing: { label: "Measure", dot: "bg-[var(--annotate-marker-green)]" },
   type: { label: "Type", dot: "bg-[var(--annotate-marker-purple)]" },
   color: { label: "Color", dot: "bg-[var(--annotate-marker-blue)]", hint: "Click to pick color" },
-  layout: { label: "Layout", dot: "bg-[var(--annotate-marker-cyan)]", hint: "Click or drag components" },
-  rearrange: { label: "Rearrange", dot: "bg-[var(--annotate-marker-orange)]", hint: "Drag to move · Del hides" },
-  "measure-v": { label: "Vertical ruler", dot: "bg-[var(--annotate-marker-pink)]", hint: "Hover & click to pin · Drag for custom · 2 horiz" },
-  "measure-h": { label: "Horizontal ruler", dot: "bg-[var(--annotate-marker-pink)]", hint: "Hover & click to pin · Drag for custom · 1 vert" },
+  layout: { label: "Design", dot: "bg-[var(--annotate-marker-cyan)]", hint: "Click or drag components" },
+  rearrange: { label: "Design", dot: "bg-[var(--annotate-marker-orange)]", hint: "Drag to move · Del hides" },
+  "measure-v": { label: "Measure", dot: "bg-[var(--annotate-marker-pink)]", hint: "Hover & click to pin · Drag for custom" },
+  "measure-h": { label: "Measure", dot: "bg-[var(--annotate-marker-pink)]", hint: "Hover & click to pin · Drag for custom" },
 };
 
 const SEGMENT_BTN_ACTIVE =
@@ -367,7 +377,8 @@ export function Toolbar(props: ToolbarProps) {
   const gooeyCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const gooeyEngineRef = useRef<GooeyEngineHandle | null>(null);
   const [gooeyWebGL, setGooeyWebGL] = useState(false);
-  const activeModeIndex = Math.max(0, MODE_ORDER.indexOf(mode));
+  const primaryMode = toPrimaryMode(mode);
+  const activeModeIndex = Math.max(0, MODE_ORDER.indexOf(primaryMode));
   const activeModeIndexRef = useRef(activeModeIndex);
   activeModeIndexRef.current = activeModeIndex;
   const isRight = side === "right";
@@ -480,11 +491,11 @@ export function Toolbar(props: ToolbarProps) {
       gripElRef.current.style.transform = `translate3d(0px, ${topShift}px, 0)`;
     }
     if (divider1ElRef.current) {
-      const mid1 = Number((((offsetsY[5] ?? 0) + (offsetsY[6] ?? 0)) / 2).toFixed(2));
+      const mid1 = Number((((offsetsY[2] ?? 0) + (offsetsY[3] ?? 0)) / 2).toFixed(2));
       divider1ElRef.current.style.transform = `translate3d(0px, ${mid1}px, 0)`;
     }
     if (divider2ElRef.current) {
-      const mid2 = Number((((offsetsY[10] ?? 0) + (offsetsY[11] ?? 0)) / 2).toFixed(2));
+      const mid2 = Number((((offsetsY[7] ?? 0) + (offsetsY[8] ?? 0)) / 2).toFixed(2));
       divider2ElRef.current.style.transform = `translate3d(0px, ${mid2}px, 0)`;
     }
   }, [computeModeRects]);
@@ -825,7 +836,7 @@ export function Toolbar(props: ToolbarProps) {
           aria-label="Tool modes"
           data-gooey-nav=""
           data-gooey-enabled={String(gooey.enabled)}
-          data-gooey-active={mode}
+          data-gooey-active={primaryMode}
           className="relative isolate flex flex-col items-center"
         >
           <canvas
@@ -837,8 +848,8 @@ export function Toolbar(props: ToolbarProps) {
           <NotchDockButton
             {...sharedDockProps(0)}
             tone="mode"
-            label="Annotate"
-            pressed={mode === "annotate"}
+            label="Select"
+            pressed={primaryMode === "annotate"}
             onClick={() => props.onSelectMode?.("annotate")}
           >
             <MousePointerClick />
@@ -846,52 +857,22 @@ export function Toolbar(props: ToolbarProps) {
           <NotchDockButton
             {...sharedDockProps(1)}
             tone="mode"
-            label="Spacing inspector"
-            shortcut="M"
-            pressed={mode === "spacing"}
-            onClick={() => props.onSelectMode?.(mode === "spacing" ? "annotate" : "spacing")}
+            label="Design"
+            shortcut="D"
+            pressed={primaryMode === "design"}
+            onClick={() => props.onSelectMode?.(primaryMode === "design" ? "annotate" : "design")}
           >
-            <RulerDimensionLine />
+            <SlidersHorizontal />
           </NotchDockButton>
           <NotchDockButton
             {...sharedDockProps(2)}
             tone="mode"
-            label="Type inspector"
-            shortcut="T"
-            pressed={mode === "type"}
-            onClick={() => props.onSelectMode?.(mode === "type" ? "annotate" : "type")}
+            label="Measure"
+            shortcut="M"
+            pressed={primaryMode === "measure"}
+            onClick={() => props.onSelectMode?.(primaryMode === "measure" ? "annotate" : "measure-v")}
           >
-            <Type />
-          </NotchDockButton>
-          <NotchDockButton
-            {...sharedDockProps(3)}
-            tone="mode"
-            label="Color inspector"
-            shortcut="K"
-            pressed={mode === "color"}
-            onClick={() => props.onSelectMode?.(mode === "color" ? "annotate" : "color")}
-          >
-            <Pipette />
-          </NotchDockButton>
-          <NotchDockButton
-            {...sharedDockProps(4)}
-            tone="mode"
-            label="Layout"
-            shortcut="L"
-            pressed={mode === "layout"}
-            onClick={() => props.onSelectMode?.(mode === "layout" ? "annotate" : "layout")}
-          >
-            <LayoutGrid />
-          </NotchDockButton>
-          <NotchDockButton
-            {...sharedDockProps(5)}
-            tone="mode"
-            label="Rearrange"
-            shortcut="R"
-            pressed={mode === "rearrange"}
-            onClick={() => props.onSelectMode?.(mode === "rearrange" ? "annotate" : "rearrange")}
-          >
-            <Move />
+            <RulerDimensionLine />
           </NotchDockButton>
         </div>
 
@@ -902,7 +883,7 @@ export function Toolbar(props: ToolbarProps) {
         {/* Canvas & output actions */}
         <div className="flex flex-col items-center">
           <NotchDockButton
-            {...sharedDockProps(6)}
+            {...sharedDockProps(3)}
             tone="warning"
             label={props.frozen ? "Unfreeze" : "Freeze"}
             shortcut="P"
@@ -912,7 +893,7 @@ export function Toolbar(props: ToolbarProps) {
             {props.frozen ? <Play /> : <Pause />}
           </NotchDockButton>
           <NotchDockButton
-            {...sharedDockProps(7)}
+            {...sharedDockProps(4)}
             label={props.markersHidden ? "Show overlays" : "Hide overlays"}
             shortcut="H"
             pressed={props.markersHidden}
@@ -921,7 +902,7 @@ export function Toolbar(props: ToolbarProps) {
             {props.markersHidden ? <EyeOff /> : <Eye />}
           </NotchDockButton>
           <NotchDockButton
-            {...sharedDockProps(8)}
+            {...sharedDockProps(5)}
             tone={props.copied ? "success" : "action"}
             label="Copy"
             shortcut="C"
@@ -932,7 +913,7 @@ export function Toolbar(props: ToolbarProps) {
             {props.copied ? <Check /> : <Copy />}
           </NotchDockButton>
           <NotchDockButton
-            {...sharedDockProps(9)}
+            {...sharedDockProps(6)}
             label="Send Annotations"
             tooltip={!props.sendAvailable ? "Send Annotations · Set webhook or MCP" : undefined}
             shortcut="S"
@@ -951,7 +932,7 @@ export function Toolbar(props: ToolbarProps) {
             )}
           </NotchDockButton>
           <NotchDockButton
-            {...sharedDockProps(10)}
+            {...sharedDockProps(7)}
             tone="destructive"
             label="Clear all"
             shortcut="X"
@@ -967,21 +948,21 @@ export function Toolbar(props: ToolbarProps) {
         </div>
         <div className="flex flex-col items-center">
           <NotchDockButton
-            {...sharedDockProps(11)}
+            {...sharedDockProps(8)}
             label={isRight ? "Move notch to left side" : "Move notch to right side"}
             onClick={props.onToggleDockSide}
           >
             {isRight ? <PanelLeft /> : <PanelRight />}
           </NotchDockButton>
           <NotchDockButton
-            {...sharedDockProps(12)}
+            {...sharedDockProps(9)}
             label="Settings"
             pressed={props.settingsOpen}
             onClick={props.onToggleSettings}
           >
             <Settings />
           </NotchDockButton>
-          <NotchDockButton {...sharedDockProps(13)} label="Exit" shortcut="Esc" onClick={props.onExit}>
+          <NotchDockButton {...sharedDockProps(10)} label="Exit" shortcut="Esc" onClick={props.onExit}>
             <X />
           </NotchDockButton>
         </div>
@@ -1015,25 +996,25 @@ export function Toolbar(props: ToolbarProps) {
                 )}
               </div>
             )}
-            {mode === "spacing" && (
+            {primaryMode === "design" && (
               <>
                 <SegmentedControl
                   role="group"
-                  aria-label="Spacing sub-mode"
-                  data-annotate-sub-mode-control={props.subMode ?? "box"}
+                  aria-label="Design sub-mode"
+                  data-design-sub-mode-control={mode}
                 >
-                  {SUB_MODES.map(({ value, label, title }) => {
-                    const active = (props.subMode ?? "box") === value;
+                  {DESIGN_SUB_MODES.map(({ value, label, shortcut, title }) => {
+                    const active = mode === value;
                     return (
                       <ToolbarButtonPrimitive
                         key={value}
                         variant="ghost"
                         size="xs"
                         aria-pressed={active}
-                        aria-keyshortcuts="V"
-                        title={`${title} (V)`}
-                        data-annotate-sub-mode={value}
-                        onClick={() => props.onSelectSubMode?.(value)}
+                        aria-keyshortcuts={shortcut}
+                        title={title}
+                        data-design-sub-mode={value}
+                        onClick={() => props.onSelectMode?.(value)}
                         className={cn(
                           "h-6 rounded-md px-2 text-[11px] font-medium",
                           active ? SEGMENT_BTN_ACTIVE : SEGMENT_BTN_IDLE,
@@ -1044,18 +1025,99 @@ export function Toolbar(props: ToolbarProps) {
                     );
                   })}
                 </SegmentedControl>
-                <KbdHint>V</KbdHint>
-                <ToolbarDivider />
-                <InspectorAids
-                  handles={props.handles}
-                  guides={props.guides}
-                  onToggleHandles={props.onToggleHandles}
-                  onToggleGuides={props.onToggleGuides}
-                />
+                {mode === "type" && (
+                  <InspectorAids guides={props.guides} onToggleGuides={props.onToggleGuides} />
+                )}
               </>
             )}
-            {mode === "type" && (
-              <InspectorAids guides={props.guides} onToggleGuides={props.onToggleGuides} />
+            {primaryMode === "measure" && (
+              <>
+                <SegmentedControl
+                  role="group"
+                  aria-label="Measure sub-mode"
+                  data-measure-sub-mode-control={mode === "spacing" ? (props.subMode ?? "box") : mode}
+                >
+                  <ToolbarButtonPrimitive
+                    variant="ghost"
+                    size="xs"
+                    aria-pressed={mode === "measure-v"}
+                    aria-keyshortcuts="1"
+                    title="Vertical auto-snap ruler (1)"
+                    data-measure-sub-mode="measure-v"
+                    onClick={() => props.onSelectMode?.("measure-v")}
+                    className={cn(
+                      "h-6 rounded-md px-2 text-[11px] font-medium",
+                      mode === "measure-v" ? SEGMENT_BTN_ACTIVE : SEGMENT_BTN_IDLE,
+                    )}
+                  >
+                    Vertical
+                  </ToolbarButtonPrimitive>
+                  <ToolbarButtonPrimitive
+                    variant="ghost"
+                    size="xs"
+                    aria-pressed={mode === "measure-h"}
+                    aria-keyshortcuts="2"
+                    title="Horizontal auto-snap ruler (2)"
+                    data-measure-sub-mode="measure-h"
+                    onClick={() => props.onSelectMode?.("measure-h")}
+                    className={cn(
+                      "h-6 rounded-md px-2 text-[11px] font-medium",
+                      mode === "measure-h" ? SEGMENT_BTN_ACTIVE : SEGMENT_BTN_IDLE,
+                    )}
+                  >
+                    Horizontal
+                  </ToolbarButtonPrimitive>
+                  <ToolbarButtonPrimitive
+                    variant="ghost"
+                    size="xs"
+                    aria-pressed={mode === "spacing" && (props.subMode ?? "box") === "box"}
+                    aria-keyshortcuts="V"
+                    title="Box: margin, padding and gap regions (V)"
+                    data-measure-sub-mode="box"
+                    data-annotate-sub-mode="box"
+                    onClick={() => {
+                      props.onSelectMode?.("spacing");
+                      props.onSelectSubMode?.("box");
+                    }}
+                    className={cn(
+                      "h-6 rounded-md px-2 text-[11px] font-medium",
+                      mode === "spacing" && (props.subMode ?? "box") === "box" ? SEGMENT_BTN_ACTIVE : SEGMENT_BTN_IDLE,
+                    )}
+                  >
+                    Box
+                  </ToolbarButtonPrimitive>
+                  <ToolbarButtonPrimitive
+                    variant="ghost"
+                    size="xs"
+                    aria-pressed={mode === "spacing" && (props.subMode ?? "box") === "lines"}
+                    aria-keyshortcuts="V"
+                    title="Lines: guides and measure (V)"
+                    data-measure-sub-mode="lines"
+                    data-annotate-sub-mode="lines"
+                    onClick={() => {
+                      props.onSelectMode?.("spacing");
+                      props.onSelectSubMode?.("lines");
+                    }}
+                    className={cn(
+                      "h-6 rounded-md px-2 text-[11px] font-medium",
+                      mode === "spacing" && (props.subMode ?? "box") === "lines" ? SEGMENT_BTN_ACTIVE : SEGMENT_BTN_IDLE,
+                    )}
+                  >
+                    Lines
+                  </ToolbarButtonPrimitive>
+                </SegmentedControl>
+                {mode === "spacing" && (
+                  <>
+                    <ToolbarDivider />
+                    <InspectorAids
+                      handles={props.handles}
+                      guides={props.guides}
+                      onToggleHandles={props.onToggleHandles}
+                      onToggleGuides={props.onToggleGuides}
+                    />
+                  </>
+                )}
+              </>
             )}
             {props.frozen && (
               <span className="inline-flex items-center gap-1 rounded-md bg-[var(--annotate-warning-soft)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--annotate-warning)]">

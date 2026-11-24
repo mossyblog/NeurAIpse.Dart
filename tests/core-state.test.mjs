@@ -203,8 +203,19 @@ test("V toggles the spacing sub-mode only while the spacing inspector is on", ()
   assert.equal(resolveShortcut(ev("v"), base), null);
   assert.equal(resolveShortcut(ev("v"), { ...base, spacingActive: false }), null);
   assert.equal(resolveShortcut(ev("v"), { ...base, spacingActive: true, editableTarget: true }), null);
-  // Existing keys keep their actions.
-  for (const [k, action] of [["m", "spacing"], ["t", "type"], ["k", "color"], ["p", "freeze"], ["l", "layout"]]) {
+  // Existing keys and new Design/Measure shortcuts keep their actions.
+  for (const [k, action] of [
+    ["d", "design"],
+    ["D", "design"],
+    ["m", "spacing"],
+    ["1", "measureV"],
+    ["2", "measureH"],
+    ["t", "type"],
+    ["k", "color"],
+    ["p", "freeze"],
+    ["l", "layout"],
+    ["r", "rearrange"],
+  ]) {
     assert.equal(resolveShortcut(ev(k), { ...base, spacingActive: true }), action);
   }
 });
