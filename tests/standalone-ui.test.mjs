@@ -210,5 +210,80 @@ test("standalone Annotate mounts self-contained Shadow DOM UI, opens toolbar, an
 
   assert.equal(themedRoot.getAttribute("data-theme"), "light");
   assert.equal(themeButton.getAttribute("data-theme-value"), "light");
+
+  // Side notch defaults to the right edge and switches sides via Settings and the notch button.
+  const notch = shadow.querySelector('[data-annotate-notch="toolbar"]');
+  assert.ok(notch, "expanded annotation bar renders as a side notch");
+  assert.equal(notch.getAttribute("data-dock-side"), "right");
+
+  const leftOption = shadow.querySelector('[data-dock-side-option="left"]');
+  assert.ok(leftOption, "settings panel exposes Left/Right notch side choice");
+
+  await act(async () => {
+    leftOption.click();
+  });
+  assert.equal(notch.getAttribute("data-dock-side"), "left");
+  assert.equal(themedRoot.getAttribute("data-dock-side"), "left");
+
+  const flipButton = toolbar.querySelector('button[aria-label="Move notch to right side"]');
+  assert.ok(flipButton, "notch includes a quick button to switch sides");
+
+  await act(async () => {
+    flipButton.click();
+  });
+  assert.equal(notch.getAttribute("data-dock-side"), "right");
+
+  // macOS Dock hover magnification: icons start small and enlarge around the hovered icon.
+  const annotateBtn = toolbar.querySelector('button[aria-label="Annotate"]');
+  const spacingBtn = toolbar.querySelector('button[aria-label="Spacing inspector"]');
+  const exitBtn = toolbar.querySelector('button[aria-label="Exit"]');
+  assert.ok(annotateBtn && spacingBtn && exitBtn);
+  assert.equal(annotateBtn.getAttribute("data-dock-factor"), "0.00");
+  assert.equal(spacingBtn.getAttribute("data-dock-factor"), "0.00");
+
+  await act(async () => {
+    spacingBtn.parentElement.dispatchEvent(new dom.window.MouseEvent("pointerover", { bubbles: true }));
+  });
+
+  const hoveredFactor = Number(spacingBtn.getAttribute("data-dock-factor"));
+  const neighborFactor = Number(annotateBtn.getAttribute("data-dock-factor"));
+  const distantFactor = Number(exitBtn.getAttribute("data-dock-factor"));
+  assert.equal(hoveredFactor, 1, "hovered icon magnifies to peak factor");
+  assert.ok(neighborFactor > 0 && neighborFactor < 1, `neighbor magnifies partially (got ${neighborFactor})`);
+  assert.equal(distantFactor, 0, "distant icon stays compact");
+  const parseScale = (el) => {
+    const match = el.style.transform.match(/scale\(([^)]+)\)/);
+    return match ? Number(match[1]) : 0;
+  };
+  assert.ok(
+    parseScale(spacingBtn) > parseScale(annotateBtn) &&
+      parseScale(annotateBtn) > parseScale(exitBtn),
+    "GPU transform scales follow the dock magnification wave",
+  );
+  assert.ok(notch.querySelector("[data-dock-tooltip]"), "dock tooltip pill renders next to hovered icon");
+
+  await act(async () => {
+    notch.dispatchEvent(new dom.window.MouseEvent("pointerout", { bubbles: true, relatedTarget: dom.window.document.body }));
+  });
+  assert.equal(spacingBtn.getAttribute("data-dock-factor"), "0.00");
+  assert.equal(notch.querySelector("[data-dock-tooltip]"), null, "tooltip hides when leaving notch");
+
+  // Dragging the grip handle across the viewport midpoint switches dock side and persists it.
+  const grip = toolbar.querySelector("[data-annotate-toolbar-grip]");
+  assert.ok(grip, "notch has a drag grip handle");
+  await act(async () => {
+    grip.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 980, clientY: 380 }));
+    grip.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, button: 0, clientX: 120, clientY: 320 }));
+    grip.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true, button: 0, clientX: 120, clientY: 320 }));
+  });
+  assert.equal(notch.getAttribute("data-dock-side"), "left", "dragging across viewport snaps notch to left side");
+
+  // Exiting returns to the collapsed Apple side notch launcher on the chosen side.
+  await act(async () => {
+    exitBtn.click();
+  });
+  const collapsedLauncher = shadow.querySelector('[data-annotate-notch="launcher"]');
+  assert.ok(collapsedLauncher, "exiting collapses back to the side notch launcher");
+  assert.equal(collapsedLauncher.getAttribute("data-dock-side"), "left");
   assert.equal(errors.length, 0, `expected zero console.error calls, got ${errors.length}`);
 });

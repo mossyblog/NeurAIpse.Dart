@@ -59,6 +59,7 @@ test("settings defaults match spec section 4", () => {
     inspectorSubMode: "box",
     inspectorHandles: false,
     inspectorGuides: false,
+    dockSide: "right",
   });
   assert.ok(Object.isFrozen(DEFAULT_SETTINGS));
 });

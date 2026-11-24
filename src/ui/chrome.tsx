@@ -2,6 +2,8 @@ import { useState, type ComponentProps, type ReactNode, type Ref } from "react";
 import { Badge, Button } from "./primitives.tsx";
 import { cn } from "cn";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import { NOTCH_FILLET_RADIUS } from "../core/dock.ts";
+import type { DockSide } from "../core/types.ts";
 
 /** Shared elevated floating surface chrome (toolbar, popups, panels). */
 export const SURFACE_CLASS =
@@ -16,8 +18,63 @@ export const FIELD_CLASS =
   "h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-2xs transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 aria-invalid:border-destructive";
 
 /** Subtle hairline separator between control groups. */
-export function ToolbarDivider({ className }: { className?: string }) {
-  return <span aria-hidden className={cn("mx-0.5 h-4 w-px shrink-0 bg-border/80", className)} />;
+export function ToolbarDivider({
+  orientation = "vertical",
+  className,
+}: {
+  orientation?: "vertical" | "horizontal";
+  className?: string;
+}) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "shrink-0 bg-border/80",
+        orientation === "horizontal" ? "my-0.5 h-px w-4" : "mx-0.5 h-4 w-px",
+        className,
+      )}
+    />
+  );
+}
+
+/**
+ * Tangent-continuous concave corner fillet connecting a side-docked Apple notch
+ * flush to the left or right viewport edge with edge bleed so no 1px gap appears.
+ */
+export function NotchFillet({ side, position }: { side: DockSide; position: "top" | "bottom" }) {
+  const r = NOTCH_FILLET_RADIUS;
+  const bleed = 2;
+  const w = r + bleed;
+  const h = r + 2;
+  const scaleX = side === "left" ? -1 : 1;
+  const scaleY = position === "bottom" ? -1 : 1;
+  return (
+    <svg
+      aria-hidden
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      className={cn(
+        "pointer-events-none absolute block overflow-visible",
+        side === "right" ? "-right-[2px]" : "-left-[2px]",
+        position === "top" ? "bottom-[calc(100%-1px)]" : "top-[calc(100%-1px)]",
+      )}
+      style={{
+        transform: scaleX === 1 && scaleY === 1 ? undefined : `scale(${scaleX}, ${scaleY})`,
+      }}
+    >
+      <path
+        d={`M 0 ${h} L ${w} ${h} L ${w} 0 L ${r} 0 L ${r} 0.5 A ${r} ${r} 0 0 1 0 ${r + 0.5} Z`}
+        fill="var(--annotate-notch-bg)"
+      />
+      <path
+        d={`M 0 ${r + 0.5} A ${r} ${r} 0 0 0 ${r} 0.5`}
+        fill="none"
+        stroke="var(--annotate-notch-border)"
+        strokeWidth="1"
+      />
+    </svg>
+  );
 }
 
 /** Recessed segmented track for mutually exclusive modes or compact toggle groups. */
@@ -145,7 +202,7 @@ export function FloatingPanel({
       className={cn(
         "annotate-enter pointer-events-auto fixed top-4 z-20 flex max-h-[calc(100vh-116px)] flex-col overflow-hidden text-sm",
         SURFACE_CLASS,
-        side === "left" ? "left-4" : "right-4",
+        side === "left" ? "left-[var(--annotate-inset-left,16px)]" : "right-[var(--annotate-inset-right,16px)]",
         width === "sm" ? "w-72" : "w-80",
         className,
       )}

@@ -55,6 +55,9 @@ const OWN_CSS = `
   --ann-border: rgba(0, 0, 0, 0.09);
   --ann-shadow-float: 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 10px 28px -6px rgba(0, 0, 0, 0.16), 0 2px 6px -1px rgba(0, 0, 0, 0.06);
   --ann-shadow-pill: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 4px 12px -2px rgba(0, 0, 0, 0.14);
+  --annotate-notch-bg: #ffffff;
+  --annotate-notch-border: #dcdce2;
+  --annotate-notch-shadow: 0 10px 28px -8px rgba(0, 0, 0, 0.16), 0 2px 8px -2px rgba(0, 0, 0, 0.08);
 }
 .annotate-root [data-theme="dark"] {
   color-scheme: dark;
@@ -97,6 +100,9 @@ const OWN_CSS = `
   --ann-border: rgba(255, 255, 255, 0.12);
   --ann-shadow-float: 0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 14px 36px -8px rgba(0, 0, 0, 0.65), 0 2px 8px -2px rgba(0, 0, 0, 0.4);
   --ann-shadow-pill: 0 0 0 0.5px rgba(255, 255, 255, 0.14), 0 4px 14px -2px rgba(0, 0, 0, 0.55);
+  --annotate-notch-bg: #141416;
+  --annotate-notch-border: #2a2a2f;
+  --annotate-notch-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.6), 0 2px 8px -2px rgba(0, 0, 0, 0.35);
 }
 .annotate-root :is([data-theme="light"], [data-theme="dark"]) {
   --annotate-destructive-soft: color-mix(in srgb, var(--annotate-destructive) 12%, transparent);
@@ -132,9 +138,20 @@ const OWN_CSS = `
   40%, 80% { transform: translateX(8px); }
 }
 .annotate-shake { animation: annotate-shake 320ms ease-in-out; }
+.annotate-notch-item {
+  will-change: transform;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.annotate-notch-icon > svg {
+  width: 100%;
+  height: 100%;
+}
 @media (prefers-reduced-motion: reduce) {
   .annotate-enter { animation: none; }
   .annotate-shake { animation: none; outline: 2px solid var(--ring); }
+  .annotate-notch-item {
+    transition: none;
+  }
 }
 `;
 

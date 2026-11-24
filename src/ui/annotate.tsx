@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "cn";
+import { clampNotchCenterY } from "../core/dock.ts";
+import { nextDockSide, settingsReactMode } from "../core/settings.ts";
 import { captureInFrames, isFixedElement, markerPosition, toPageRect, type ElementCapture } from "../core/capture.ts";
 import { copyToClipboard as writeClipboard } from "../core/copy.ts";
 import { buildCopyText, copyFormatAttribute, NO_MATCHING_METADATA } from "../core/copy-format.ts";
@@ -34,7 +36,6 @@ import {
   SEND_RESULT_MS,
   type SendState,
 } from "../core/send.ts";
-import { settingsReactMode } from "../core/settings.ts";
 import { nextSubMode, type InspectorSubMode } from "../core/spacing-modes.ts";
 import type { ShortcutAction } from "../core/shortcuts.ts";
 import { getRouteKey, loadSettings, loadTheme, saveSettings, saveTheme } from "../core/storage.ts";
@@ -728,19 +729,49 @@ export function Annotate({
     });
   };
 
-  const { anchor, right, bottom, dockRef, handlers, dragHandlers } = useDragPosition(toggle, active);
+  const {
+    side: dockSide,
+    centerY: notchCenterY,
+    dragging: notchDragging,
+    viewport,
+    dockRef,
+    handlers,
+    dragHandlers,
+  } = useDragPosition(toggle, {
+    side: settings.dockSide,
+    onSideChange: (nextSide) => updateSettings({ ...settings, dockSide: nextSide }),
+    expanded: active,
+  });
+
+  const toggleDockSide = () =>
+    updateSettings({ ...settings, dockSide: nextDockSide(settings.dockSide) });
+
+  const settingsCenterY = clampNotchCenterY(notchCenterY, 440, viewport.height, 16);
+  const rootInsets = {
+    "--annotate-inset-right": active && dockSide === "right" ? "64px" : "16px",
+    "--annotate-inset-left": active && dockSide === "left" ? "64px" : "16px",
+  } as CSSProperties;
 
   const settingsPanel = active && settingsOpen && (
-    <SettingsPanel
-      settings={settings}
-      theme={theme}
-      endpoint={props.endpoint}
-      syncStatus={sync.status}
-      sessionId={sync.sessionId}
-      webhookUrlProp={props.webhookUrl}
-      onChange={updateSettings}
-      onThemeChange={updateTheme}
-    />
+    <div
+      data-annotate-settings-popover=""
+      style={{ top: settingsCenterY, transform: "translateY(-50%)" }}
+      className={cn(
+        "pointer-events-auto fixed z-30",
+        dockSide === "right" ? "right-[64px]" : "left-[64px]",
+      )}
+    >
+      <SettingsPanel
+        settings={settings}
+        theme={theme}
+        endpoint={props.endpoint}
+        syncStatus={sync.status}
+        sessionId={sync.sessionId}
+        webhookUrlProp={props.webhookUrl}
+        onChange={updateSettings}
+        onThemeChange={updateTheme}
+      />
+    </div>
   );
 
   return createPortal(
@@ -749,7 +780,9 @@ export function Annotate({
       data-theme={theme}
       data-agentation-theme={theme}
       data-style="clean"
+      data-dock-side={dockSide}
       data-frozen={frozen || undefined}
+      style={rootInsets}
       className="text-foreground"
     >
       {active && !markersHidden && (
@@ -846,16 +879,7 @@ export function Annotate({
           }}
         />
       )}
-      <div
-        ref={dockRef}
-        data-annotate-dock=""
-        className={cn(
-          "fixed z-30 flex max-w-[calc(100vw-32px)] gap-2",
-          bottom ? "flex-col" : "flex-col-reverse",
-          right ? "items-end" : "items-start",
-        )}
-        style={anchor}
-      >
+      <div data-annotate-dock="" data-dock-side={dockSide} className="pointer-events-none">
         {settingsPanel}
         {active ? (
           <Toolbar
@@ -888,11 +912,21 @@ export function Annotate({
             onToggleSettings={() => setSettingsOpen((open) => !open)}
             onExit={deactivate}
             dragHandlers={dragHandlers}
-            dockBottom={bottom}
-            dockRight={right}
+            dockSide={dockSide}
+            onToggleDockSide={toggleDockSide}
+            centerY={notchCenterY}
+            dragging={notchDragging}
+            notchRef={dockRef}
           />
         ) : (
-          <Launcher annotationCount={annotations.length} handlers={handlers} />
+          <Launcher
+            annotationCount={annotations.length}
+            side={dockSide}
+            centerY={notchCenterY}
+            dragging={notchDragging}
+            notchRef={dockRef}
+            handlers={handlers}
+          />
         )}
       </div>
     </div>,

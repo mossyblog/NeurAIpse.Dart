@@ -91,6 +91,7 @@ test("every settings field round-trips through feedback-toolbar-settings", () =>
     inspectorSubMode: "lines",
     inspectorHandles: true,
     inspectorGuides: true,
+    dockSide: "left",
   };
   saveSettings(settings, storage);
   assert.deepEqual(JSON.parse(storage.data.get(SETTINGS_KEY)), settings);

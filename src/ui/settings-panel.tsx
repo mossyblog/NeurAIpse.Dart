@@ -207,6 +207,37 @@ function MainView({
               {theme === "dark" ? "Dark" : "Light"}
             </Button>
           </Row>
+          <Row label="Notch side" labelId={`${id}-dock-side`}>
+            <SegmentedControl>
+              <RadioGroup
+                aria-labelledby={`${id}-dock-side`}
+                className="flex items-center gap-0.5"
+                value={settings.dockSide}
+                onValueChange={(dockSide) => {
+                  if (dockSide === "left" || dockSide === "right") set({ dockSide });
+                }}
+              >
+                {(["left", "right"] as const).map((side) => {
+                  const active = settings.dockSide === side;
+                  return (
+                    <Radio
+                      key={side}
+                      value={side}
+                      data-dock-side-option={side}
+                      className={cn(
+                        "inline-flex h-6 cursor-pointer items-center justify-center rounded-[5px] px-2.5 text-xs font-medium transition-all outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                        active
+                          ? "bg-background text-foreground shadow-xs ring-1 ring-foreground/10 dark:bg-foreground/15"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {side === "left" ? "Left" : "Right"}
+                    </Radio>
+                  );
+                })}
+              </RadioGroup>
+            </SegmentedControl>
+          </Row>
         </div>
 
         <div className="flex flex-col gap-2.5 px-3.5 py-3">

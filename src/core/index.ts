@@ -1,4 +1,5 @@
 export type * from "./types.ts";
+export * from "./dock.ts";
 export * from "./settings.ts";
 export * from "./storage.ts";
 export * from "./serialize.ts";

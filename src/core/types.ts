@@ -8,6 +8,8 @@ export type OutputDetail = "compact" | "standard" | "detailed" | "forensic";
 
 export type MarkerClickBehavior = "edit" | "delete";
 
+export type DockSide = "right" | "left";
+
 export type CopyFormat = "markdown" | "source" | "classes" | { attribute: string };
 
 export type Annotation = {
@@ -94,6 +96,8 @@ export type Settings = {
   inspectorHandles: boolean;
   /** I9 token guides: spacing Box sides and the type ladder (inspector spec 13.3, I9b). */
   inspectorGuides: boolean;
+  /** Viewport edge the side-notch annotation bar docks to. */
+  dockSide: DockSide;
 };
 
 export type Theme = "dark" | "light";

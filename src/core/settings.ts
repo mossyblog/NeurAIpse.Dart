@@ -1,5 +1,15 @@
 import { DEFAULT_INSPECTOR_SUB_MODE, isInspectorSubMode } from "./spacing-modes.ts";
-import type { OutputDetail, Settings, Theme } from "./types.ts";
+import type { DockSide, OutputDetail, Settings, Theme } from "./types.ts";
+
+export const DOCK_SIDES: readonly DockSide[] = ["left", "right"];
+
+export function isDockSide(value: unknown): value is DockSide {
+  return value === "left" || value === "right";
+}
+
+export function nextDockSide(side: DockSide): DockSide {
+  return side === "right" ? "left" : "right";
+}
 
 export const OUTPUT_DETAILS: readonly OutputDetail[] = [
   "compact",
@@ -42,6 +52,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   inspectorSubMode: DEFAULT_INSPECTOR_SUB_MODE,
   inspectorHandles: false,
   inspectorGuides: false,
+  dockSide: "right",
 });
 
 /** Compact -> Standard -> Detailed -> Forensic -> Compact. */
@@ -123,5 +134,6 @@ export function normalizeSettings(value: unknown): Settings {
   }
   if (typeof input.webhookUrl === "string") settings.webhookUrl = input.webhookUrl;
   if (isInspectorSubMode(input.inspectorSubMode)) settings.inspectorSubMode = input.inspectorSubMode;
+  if (isDockSide(input.dockSide)) settings.dockSide = input.dockSide;
   return settings;
 }

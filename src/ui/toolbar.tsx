@@ -1,24 +1,36 @@
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode, type Ref } from "react";
 import {
   Kbd,
   Toolbar as ToolbarPrimitive,
   ToolbarButton as ToolbarButtonPrimitive,
 } from "./primitives.tsx";
 import { cn } from "cn";
+import {
+  DOCK_BASE_SIZE,
+  DOCK_INFLUENCE_RADIUS,
+  DOCK_RENDER_SIZE,
+  DOCK_SLOT_PITCH,
+  computeDockOffsets,
+  dockMagnification,
+  dockMetricsForFactor,
+} from "../core/dock.ts";
 import { SEND_LABELS, type SendState } from "../core/send.ts";
 import type { InspectorSubMode } from "../core/spacing-modes.ts";
 import type { SyncStatus } from "../core/sync.ts";
+import type { DockSide } from "../core/types.ts";
 import {
   Check,
   CircleAlert,
   Copy,
   Eye,
   EyeOff,
-  GripVertical,
+  GripHorizontal,
   LayoutGrid,
   LoaderCircle,
   MousePointerClick,
   Move,
+  PanelLeft,
+  PanelRight,
   Pause,
   Pipette,
   Play,
@@ -29,12 +41,39 @@ import {
   Type,
   X,
 } from "lucide-react";
-import { KbdHint, SegmentedControl, SURFACE_CLASS, ToolbarDivider } from "./chrome.tsx";
+import {
+  KbdHint,
+  NotchFillet,
+  PILL_CLASS,
+  SegmentedControl,
+  SURFACE_CLASS,
+  ToolbarDivider,
+} from "./chrome.tsx";
 import type { DragPointerHandlers } from "./use-drag-position.ts";
 
 type ToolMode = "annotate" | "spacing" | "type" | "color" | "layout" | "rearrange";
 
-type ToolbarButtonProps = {
+const TOTAL_DOCK_ITEMS = 14;
+const REST_SCALE = Number((DOCK_BASE_SIZE / DOCK_RENDER_SIZE).toFixed(4));
+const SPRING_RATE = 24;
+
+function syntheticOffset(index: number): number {
+  return (index - (TOTAL_DOCK_ITEMS - 1) / 2) * DOCK_SLOT_PITCH;
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+}
+
+type DockButtonProps = {
+  index: number;
+  side: DockSide;
+  showTooltip: boolean;
+  registerSlot: (index: number, el: HTMLElement | null) => void;
+  registerButton: (index: number, el: HTMLElement | null) => void;
+  onHoverItem: (index: number) => void;
+  onFocusItem: (index: number) => void;
+  onBlurItem: (index: number) => void;
   label: string;
   shortcut?: string;
   pressed?: boolean;
@@ -43,11 +82,20 @@ type ToolbarButtonProps = {
   /** Send button only: exposed as `data-send-state` and in the tooltip. */
   sendState?: SendState;
   tone?: "mode" | "action" | "warning" | "success" | "destructive";
+  badge?: number;
   className?: string;
   children: ReactNode;
 };
 
-function ToolbarButton({
+function NotchDockButton({
+  index,
+  side,
+  showTooltip,
+  registerSlot,
+  registerButton,
+  onHoverItem,
+  onFocusItem,
+  onBlurItem,
   label,
   shortcut,
   pressed,
@@ -55,14 +103,16 @@ function ToolbarButton({
   onClick,
   sendState,
   tone = "action",
+  badge,
   className,
   children,
-}: ToolbarButtonProps) {
+}: DockButtonProps) {
   const tip = sendState && sendState !== "idle" ? SEND_LABELS[sendState] : label;
+  const isRight = side === "right";
   const activeStyle =
     tone === "mode"
       ? pressed
-        ? "bg-background text-foreground shadow-2xs ring-1 ring-foreground/10 hover:bg-background dark:bg-foreground/15 dark:ring-white/12"
+        ? "bg-background text-foreground shadow-2xs ring-1 ring-foreground/10 hover:bg-background dark:bg-foreground/15 dark:ring-white/15"
         : "text-muted-foreground hover:bg-background/60 hover:text-foreground dark:hover:bg-foreground/10"
       : tone === "warning" && pressed
         ? "bg-[var(--annotate-warning-soft)] text-[var(--annotate-warning)] ring-1 ring-[var(--annotate-warning)]/30 hover:bg-[var(--annotate-warning-soft)]"
@@ -71,24 +121,73 @@ function ToolbarButton({
           : tone === "destructive"
             ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
             : pressed
-              ? "bg-muted text-foreground ring-1 ring-foreground/10 dark:ring-white/12"
+              ? "bg-muted text-foreground ring-1 ring-foreground/10 dark:ring-white/15"
               : "text-muted-foreground hover:bg-muted/80 hover:text-foreground";
 
   return (
-    <ToolbarButtonPrimitive
-      variant="ghost"
-      size="icon-sm"
-      aria-label={label}
-      aria-pressed={pressed}
-      aria-keyshortcuts={shortcut}
-      title={shortcut ? `${tip} (${shortcut})` : tip}
-      data-send-state={sendState}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn("rounded-lg [&_svg]:size-4", activeStyle, className)}
+    <div
+      ref={(el) => registerSlot(index, el)}
+      style={{ width: `${DOCK_SLOT_PITCH}px`, height: `${DOCK_SLOT_PITCH}px` }}
+      className="relative flex shrink-0 items-center justify-center"
+      onPointerEnter={() => onHoverItem(index)}
     >
-      {children}
-    </ToolbarButtonPrimitive>
+      <ToolbarButtonPrimitive
+        ref={(el: HTMLElement | null) => registerButton(index, el)}
+        variant="ghost"
+        size="icon-sm"
+        aria-label={label}
+        aria-pressed={pressed}
+        aria-keyshortcuts={shortcut}
+        title={shortcut ? `${tip} (${shortcut})` : tip}
+        data-send-state={sendState}
+        data-dock-item={index}
+        data-dock-factor="0.00"
+        disabled={disabled}
+        onClick={onClick}
+        onFocus={() => onFocusItem(index)}
+        onBlur={() => onBlurItem(index)}
+        style={{
+          width: `${DOCK_RENDER_SIZE}px`,
+          height: `${DOCK_RENDER_SIZE}px`,
+          transform: `translate3d(0px, 0px, 0) scale(${REST_SCALE})`,
+        }}
+        className={cn(
+          "annotate-notch-item relative shrink-0 rounded-xl p-0 active:translate-y-0",
+          activeStyle,
+          className,
+        )}
+      >
+        <span aria-hidden className="annotate-notch-icon flex size-5 items-center justify-center">
+          {children}
+        </span>
+        {badge != null && badge > 0 && (
+          <span
+            aria-hidden
+            className={cn(
+              "pointer-events-none absolute -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-0.5 font-mono text-[10px] leading-none font-semibold tabular-nums text-primary-foreground",
+              isRight ? "-left-0.5" : "-right-0.5",
+            )}
+          >
+            {badge}
+          </span>
+        )}
+      </ToolbarButtonPrimitive>
+
+      {showTooltip && (
+        <span
+          aria-hidden
+          data-dock-tooltip=""
+          className={cn(
+            PILL_CLASS,
+            "pointer-events-none absolute top-1/2 z-40 flex -translate-y-1/2 items-center gap-1.5 px-2 py-1 text-[11px] leading-none font-medium whitespace-nowrap",
+            isRight ? "right-full mr-4" : "left-full ml-4",
+          )}
+        >
+          <span>{tip}</span>
+          {shortcut && <KbdHint>{shortcut}</KbdHint>}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -129,12 +228,18 @@ export type ToolbarProps = {
   onClear: () => void;
   onToggleSettings: () => void;
   onExit: () => void;
-  /** Pointer-only drag handlers for repositioning the expanded toolbar via its grip. */
+  /** Pointer-only drag handlers for sliding the notch vertically or across to the other edge. */
   dragHandlers?: DragPointerHandlers;
-  /** Whether the dock is anchored near the bottom viewport edge (stacks tray above bar). */
-  dockBottom?: boolean;
-  /** Whether the dock is anchored near the right viewport edge (aligns tray right). */
-  dockRight?: boolean;
+  /** Which viewport edge the side notch is docked to. */
+  dockSide?: DockSide;
+  /** Flip the notch to the opposite viewport edge. */
+  onToggleDockSide?: () => void;
+  /** Vertical center coordinate (px) for the edge-docked notch. */
+  centerY?: number;
+  /** True while the notch is being dragged. */
+  dragging?: boolean;
+  /** Ref attached to the vertical notch body for height measurement. */
+  notchRef?: Ref<HTMLDivElement>;
 };
 
 const SUB_MODES: { value: InspectorSubMode; label: string; title: string }[] = [
@@ -159,13 +264,15 @@ const SEGMENT_BTN_IDLE =
 function InspectorAids(props: Pick<ToolbarProps, "handles" | "guides" | "onToggleHandles" | "onToggleGuides">) {
   const toggles = [
     ...(props.onToggleHandles
-      ? [{
-          id: "handles",
-          label: "Handles",
-          on: Boolean(props.handles),
-          title: "Handles: drag a selected side to a spacing token (Box)",
-          onClick: props.onToggleHandles,
-        }]
+      ? [
+          {
+            id: "handles",
+            label: "Handles",
+            on: Boolean(props.handles),
+            title: "Handles: drag a selected side to a spacing token (Box)",
+            onClick: props.onToggleHandles,
+          },
+        ]
       : []),
     {
       id: "guides",
@@ -199,41 +306,508 @@ function InspectorAids(props: Pick<ToolbarProps, "handles" | "guides" | "onToggl
 
 export function Toolbar(props: ToolbarProps) {
   const mode = props.mode ?? "annotate";
-  const dockBottom = props.dockBottom ?? true;
-  const dockRight = props.dockRight ?? true;
+  const side: DockSide = props.dockSide ?? "right";
+  const isRight = side === "right";
+  const centerY = props.centerY ?? (typeof window === "undefined" ? 360 : Math.round(window.innerHeight / 2));
   const empty = props.annotationCount === 0;
   /** Copy, Send and Clear include style changes and measurements (inspector I7). */
   const nothing = empty && !props.styleChangeCount && !props.placementCount && !props.rearrangeCount;
+  const totalCount =
+    props.annotationCount +
+    (props.styleChangeCount ?? 0) +
+    (props.rearrangeCount ?? 0) +
+    (props.placementCount ?? 0);
 
-  const hasCounts =
-    props.annotationCount > 0 ||
-    (props.styleChangeCount ?? 0) > 0 ||
-    (props.rearrangeCount ?? 0) > 0 ||
-    (props.placementCount ?? 0) > 0;
+  const hasCounts = totalCount > 0;
   const hasSync = props.syncStatus === "connected" || props.syncStatus === "offline";
   const hasLeftTray = mode !== "annotate" || props.frozen;
   const hasRightTray = hasCounts || hasSync || Boolean(props.status);
   const showTray = hasLeftTray || hasRightTray;
   const modeMeta = mode === "annotate" ? null : MODE_META[mode];
 
+  // GPU-composited macOS Dock hover magnification (zero React re-renders during pointermove).
+  const notchElRef = useRef<HTMLDivElement | null>(null);
+  const slotElsRef = useRef<(HTMLElement | null)[]>([]);
+  const buttonElsRef = useRef<(HTMLElement | null)[]>([]);
+  const restingOffsetsRef = useRef<number[]>([]);
+  const notchCenterYRef = useRef<number | null>(null);
+  const sideRef = useRef<DockSide>(side);
+  const pointerRelYRef = useRef<number | null>(null);
+  const pivotIndexRef = useRef<number | null>(null);
+  const currentFactorsRef = useRef<number[]>(new Array<number>(TOTAL_DOCK_ITEMS).fill(0));
+  const targetFactorsRef = useRef<number[]>(new Array<number>(TOTAL_DOCK_ITEMS).fill(0));
+  const rafIdRef = useRef<number | null>(null);
+  const lastFrameRef = useRef<number>(0);
+
+  const [dockHovered, setDockHovered] = useState(false);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    sideRef.current = side;
+  }, [side]);
+
+  const setNotchRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      notchElRef.current = node;
+      if (typeof props.notchRef === "function") props.notchRef(node);
+      else if (props.notchRef && "current" in props.notchRef) {
+        (props.notchRef as { current: HTMLDivElement | null }).current = node;
+      }
+    },
+    [props.notchRef],
+  );
+
+  const registerSlot = useCallback((index: number, el: HTMLElement | null) => {
+    slotElsRef.current[index] = el;
+  }, []);
+
+  const registerButton = useCallback((index: number, el: HTMLElement | null) => {
+    buttonElsRef.current[index] = el;
+  }, []);
+
+  /** Writes GPU-only translate3d + scale directly to button DOM nodes (zero layout reflow). */
+  const applyFactorsToDom = useCallback((factors: readonly number[], pivot: number | null) => {
+    const offsetsY = computeDockOffsets(factors, pivot);
+    const dir = sideRef.current === "right" ? -1 : 1;
+    for (let i = 0; i < TOTAL_DOCK_ITEMS; i++) {
+      const btn = buttonElsRef.current[i];
+      if (!btn) continue;
+      const metrics = dockMetricsForFactor(factors[i] ?? 0);
+      const shiftX = Number((dir * metrics.protrusion).toFixed(2));
+      const shiftY = offsetsY[i] ?? 0;
+      btn.style.transform = `translate3d(${shiftX}px, ${shiftY}px, 0) scale(${metrics.scale})`;
+      btn.style.zIndex = metrics.factor > 0.5 ? "2" : metrics.factor > 0.05 ? "1" : "";
+      btn.setAttribute("data-dock-factor", metrics.factor.toFixed(2));
+    }
+  }, []);
+
+  const stopLoop = useCallback(() => {
+    if (rafIdRef.current !== null) {
+      window.cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+  }, []);
+
+  const startLoop = useCallback(() => {
+    if (rafIdRef.current !== null) return;
+    lastFrameRef.current = performance.now();
+    const tick = (now: number) => {
+      const dt = Math.min(0.05, Math.max(0.001, (now - lastFrameRef.current) / 1000));
+      lastFrameRef.current = now;
+      const alpha = 1 - Math.exp(-dt * SPRING_RATE);
+      const current = currentFactorsRef.current;
+      const target = targetFactorsRef.current;
+      let maxDiff = 0;
+      for (let i = 0; i < TOTAL_DOCK_ITEMS; i++) {
+        const diff = target[i] - current[i];
+        if (Math.abs(diff) < 0.002) {
+          current[i] = target[i];
+        } else {
+          current[i] += diff * alpha;
+          if (Math.abs(target[i] - current[i]) > maxDiff) {
+            maxDiff = Math.abs(target[i] - current[i]);
+          }
+        }
+      }
+      applyFactorsToDom(current, pivotIndexRef.current);
+      if (maxDiff > 0.002) {
+        rafIdRef.current = window.requestAnimationFrame(tick);
+      } else {
+        rafIdRef.current = null;
+      }
+    };
+    rafIdRef.current = window.requestAnimationFrame(tick);
+  }, [applyFactorsToDom]);
+
+  const setTargets = useCallback(
+    (relY: number | null, pivot: number | null, immediate = false) => {
+      pivotIndexRef.current = pivot;
+      const target = targetFactorsRef.current;
+      for (let i = 0; i < TOTAL_DOCK_ITEMS; i++) {
+        const resting = restingOffsetsRef.current[i] ?? syntheticOffset(i);
+        target[i] = relY === null ? 0 : dockMagnification(relY - resting, DOCK_INFLUENCE_RADIUS);
+      }
+      if (immediate || prefersReducedMotion()) {
+        stopLoop();
+        for (let i = 0; i < TOTAL_DOCK_ITEMS; i++) currentFactorsRef.current[i] = target[i];
+        applyFactorsToDom(currentFactorsRef.current, pivot);
+        return;
+      }
+      startLoop();
+    },
+    [applyFactorsToDom, startLoop, stopLoop],
+  );
+
+  useEffect(() => () => stopLoop(), [stopLoop]);
+
+  // Reset magnification cleanly when dragging starts.
+  useEffect(() => {
+    if (!props.dragging) return;
+    pointerRelYRef.current = null;
+    setDockHovered(false);
+    setHoveredIndex(null);
+    setTargets(null, null, true);
+  }, [props.dragging, setTargets]);
+
+  /**
+   * Snapshots resting slot centers ONCE on pointer entry (never during pointermove)
+   * so there is zero forced synchronous layout during cursor tracking.
+   */
+  const captureGeometry = useCallback((): boolean => {
+    const notch = notchElRef.current;
+    if (!notch) return false;
+    const notchRect = notch.getBoundingClientRect();
+    if (notchRect.height <= 0) {
+      notchCenterYRef.current = null;
+      restingOffsetsRef.current = Array.from({ length: TOTAL_DOCK_ITEMS }, (_, i) => syntheticOffset(i));
+      return false;
+    }
+    const notchCenter = notchRect.top + notchRect.height / 2;
+    notchCenterYRef.current = notchCenter;
+    const offsets: number[] = [];
+    for (let i = 0; i < TOTAL_DOCK_ITEMS; i++) {
+      const el = slotElsRef.current[i];
+      if (!el) {
+        offsets[i] = syntheticOffset(i);
+        continue;
+      }
+      const rect = el.getBoundingClientRect();
+      offsets[i] = rect.height > 0 ? rect.top + rect.height / 2 - notchCenter : syntheticOffset(i);
+    }
+    restingOffsetsRef.current = offsets;
+    return true;
+  }, []);
+
+  /** Computes continuous floating-point pivot index from pointerRelY for silky wave gliding. */
+  const resolvePivot = (relY: number): { pivot: number; nearest: number; dist: number } => {
+    const offsets = restingOffsetsRef.current;
+    let nearest = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < TOTAL_DOCK_ITEMS; i++) {
+      const dist = Math.abs(relY - (offsets[i] ?? syntheticOffset(i)));
+      if (dist < bestDist) {
+        bestDist = dist;
+        nearest = i;
+      }
+    }
+    let pivot = nearest;
+    const cur = offsets[nearest] ?? syntheticOffset(nearest);
+    if (relY > cur && nearest < TOTAL_DOCK_ITEMS - 1) {
+      const next = offsets[nearest + 1] ?? syntheticOffset(nearest + 1);
+      if (next > cur) pivot = nearest + Math.min(1, (relY - cur) / (next - cur));
+    } else if (relY < cur && nearest > 0) {
+      const prev = offsets[nearest - 1] ?? syntheticOffset(nearest - 1);
+      if (cur > prev) pivot = nearest - Math.min(1, (cur - relY) / (cur - prev));
+    }
+    return { pivot, nearest, dist: bestDist };
+  };
+
+  const handleDockPointerEnter = (event: PointerEvent<HTMLDivElement>) => {
+    if (props.dragging) return;
+    setDockHovered(true);
+    const hasLayout = captureGeometry();
+    if (hasLayout && notchCenterYRef.current !== null) {
+      const relY = event.clientY - notchCenterYRef.current;
+      pointerRelYRef.current = relY;
+      const { pivot, nearest, dist } = resolvePivot(relY);
+      if (dist < DOCK_INFLUENCE_RADIUS * 0.55) {
+        setHoveredIndex((prev) => (prev === nearest ? prev : nearest));
+      }
+      setTargets(relY, pivot);
+    }
+  };
+
+  const handleDockPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (props.dragging) return;
+    if (notchCenterYRef.current === null) {
+      const hasLayout = captureGeometry();
+      if (!hasLayout || notchCenterYRef.current === null) return;
+    }
+    const relY = event.clientY - notchCenterYRef.current;
+    pointerRelYRef.current = relY;
+    const { pivot, nearest, dist } = resolvePivot(relY);
+    if (dist < DOCK_INFLUENCE_RADIUS * 0.55) {
+      setHoveredIndex((prev) => (prev === nearest ? prev : nearest));
+    } else {
+      setHoveredIndex((prev) => (prev === null ? prev : null));
+    }
+    setTargets(relY, pivot);
+  };
+
+  const handleDockPointerLeave = () => {
+    pointerRelYRef.current = null;
+    notchCenterYRef.current = null;
+    setDockHovered(false);
+    setHoveredIndex(null);
+    const hasLayout = (notchElRef.current?.getBoundingClientRect().height ?? 0) > 0;
+    setTargets(null, null, !hasLayout);
+  };
+
+  const handleHoverItem = (index: number) => {
+    if (props.dragging) return;
+    setDockHovered(true);
+    setHoveredIndex((prev) => (prev === index ? prev : index));
+    if (notchCenterYRef.current === null) {
+      const hasLayout = captureGeometry();
+      if (!hasLayout) {
+        // Synthetic / JSDOM environment without layout boxes: apply wave immediately.
+        setTargets(syntheticOffset(index), index, true);
+      }
+    }
+  };
+
+  const handleFocusItem = (index: number) => {
+    setFocusedIndex(index);
+    if (pointerRelYRef.current === null) {
+      const hasLayout = captureGeometry();
+      const offset = restingOffsetsRef.current[index] ?? syntheticOffset(index);
+      setTargets(offset, index, !hasLayout);
+    }
+  };
+
+  const handleBlurItem = (index: number) => {
+    setFocusedIndex((current) => (current === index ? null : current));
+    if (pointerRelYRef.current === null) {
+      const hasLayout = (notchElRef.current?.getBoundingClientRect().height ?? 0) > 0;
+      setTargets(null, null, !hasLayout);
+    }
+  };
+
+  const activeTooltipIndex = !props.dragging ? (hoveredIndex ?? focusedIndex) : null;
+
+  const sharedDockProps = (index: number) => ({
+    index,
+    side,
+    showTooltip: activeTooltipIndex === index,
+    registerSlot,
+    registerButton,
+    onHoverItem: handleHoverItem,
+    onFocusItem: handleFocusItem,
+    onBlurItem: handleBlurItem,
+  });
+
   return (
     <ToolbarPrimitive
+      orientation="vertical"
       aria-label="Feedback controls"
-      className={cn(
-        "flex max-w-full gap-1.5",
-        dockBottom ? "flex-col" : "flex-col-reverse",
-        dockRight ? "items-end" : "items-start",
-        props.className,
-      )}
+      data-dock-side={side}
+      className={cn("pointer-events-none", props.className)}
     >
-      {/* Contextual secondary tray: stacks vertically so the main bar never jumps horizontally. */}
+      {/* Apple-style side notch with 120fps GPU macOS Dock hover magnification */}
+      <div
+        ref={setNotchRef}
+        data-annotate-notch="toolbar"
+        data-dock-side={side}
+        data-dock-hovered={dockHovered && !props.dragging ? "true" : undefined}
+        style={{
+          top: centerY,
+          transform: "translateY(-50%)",
+          borderRightWidth: isRight ? 0 : 1,
+          borderLeftWidth: isRight ? 1 : 0,
+        }}
+        onPointerEnter={handleDockPointerEnter}
+        onPointerMove={handleDockPointerMove}
+        onPointerLeave={handleDockPointerLeave}
+        className={cn(
+          "pointer-events-auto fixed z-30 flex flex-col items-center gap-1 overflow-visible border-y border-solid py-5",
+          "bg-[var(--annotate-notch-bg)] text-popover-foreground border-[var(--annotate-notch-border)] shadow-[var(--annotate-notch-shadow)]",
+          "transition-[padding] duration-150 ease-out motion-reduce:transition-none",
+          isRight ? "right-0 rounded-l-[18px]" : "left-0 rounded-r-[18px]",
+          dockHovered && !props.dragging
+            ? isRight
+              ? "pr-2.5 pl-3"
+              : "pl-2.5 pr-3"
+            : "px-2",
+        )}
+      >
+        <NotchFillet side={side} position="top" />
+        <NotchFillet side={side} position="bottom" />
+
+        {props.dragHandlers && (
+          <button
+            type="button"
+            aria-label="Move toolbar"
+            title="Drag vertically to reposition · Drag across screen to switch side"
+            data-annotate-toolbar-grip=""
+            className={cn(
+              "mb-0.5 flex h-4 w-6 shrink-0 touch-none items-center justify-center rounded-md text-muted-foreground/55 transition-colors outline-none hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40",
+              props.dragging ? "cursor-grabbing" : "cursor-grab active:cursor-grabbing",
+            )}
+            {...props.dragHandlers}
+          >
+            <GripHorizontal aria-hidden className="size-3.5" />
+          </button>
+        )}
+
+        {/* Mode selection group */}
+        <div
+          role="group"
+          aria-label="Tool modes"
+          className="flex flex-col items-center rounded-xl bg-muted/65 p-0.5 ring-1 ring-inset ring-foreground/[0.06] dark:ring-white/[0.08]"
+        >
+          <NotchDockButton
+            {...sharedDockProps(0)}
+            tone="mode"
+            label="Annotate"
+            pressed={mode === "annotate"}
+            onClick={() => props.onSelectMode?.("annotate")}
+          >
+            <MousePointerClick />
+          </NotchDockButton>
+          <NotchDockButton
+            {...sharedDockProps(1)}
+            tone="mode"
+            label="Spacing inspector"
+            shortcut="M"
+            pressed={mode === "spacing"}
+            onClick={() => props.onSelectMode?.(mode === "spacing" ? "annotate" : "spacing")}
+          >
+            <RulerDimensionLine />
+          </NotchDockButton>
+          <NotchDockButton
+            {...sharedDockProps(2)}
+            tone="mode"
+            label="Type inspector"
+            shortcut="T"
+            pressed={mode === "type"}
+            onClick={() => props.onSelectMode?.(mode === "type" ? "annotate" : "type")}
+          >
+            <Type />
+          </NotchDockButton>
+          <NotchDockButton
+            {...sharedDockProps(3)}
+            tone="mode"
+            label="Colour inspector"
+            shortcut="K"
+            pressed={mode === "color"}
+            onClick={() => props.onSelectMode?.(mode === "color" ? "annotate" : "color")}
+          >
+            <Pipette />
+          </NotchDockButton>
+          <NotchDockButton
+            {...sharedDockProps(4)}
+            tone="mode"
+            label="Layout"
+            shortcut="L"
+            pressed={mode === "layout"}
+            onClick={() => props.onSelectMode?.(mode === "layout" ? "annotate" : "layout")}
+          >
+            <LayoutGrid />
+          </NotchDockButton>
+          <NotchDockButton
+            {...sharedDockProps(5)}
+            tone="mode"
+            label="Rearrange"
+            shortcut="R"
+            pressed={mode === "rearrange"}
+            onClick={() => props.onSelectMode?.(mode === "rearrange" ? "annotate" : "rearrange")}
+          >
+            <Move />
+          </NotchDockButton>
+        </div>
+
+        <ToolbarDivider orientation="horizontal" />
+
+        {/* Canvas & output actions */}
+        <div className="flex flex-col items-center">
+          <NotchDockButton
+            {...sharedDockProps(6)}
+            tone="warning"
+            label={props.frozen ? "Unfreeze" : "Freeze"}
+            shortcut="P"
+            pressed={props.frozen}
+            onClick={props.onToggleFreeze}
+          >
+            {props.frozen ? <Play /> : <Pause />}
+          </NotchDockButton>
+          <NotchDockButton
+            {...sharedDockProps(7)}
+            label={props.markersHidden ? "Show markers" : "Hide markers"}
+            shortcut="H"
+            pressed={props.markersHidden}
+            disabled={empty && !props.placementCount}
+            onClick={props.onToggleMarkers}
+          >
+            {props.markersHidden ? <EyeOff /> : <Eye />}
+          </NotchDockButton>
+          <NotchDockButton
+            {...sharedDockProps(8)}
+            tone={props.copied ? "success" : "action"}
+            label="Copy"
+            shortcut="C"
+            badge={totalCount}
+            disabled={nothing}
+            onClick={props.onCopy}
+          >
+            {props.copied ? <Check /> : <Copy />}
+          </NotchDockButton>
+          <NotchDockButton
+            {...sharedDockProps(9)}
+            label="Send Annotations"
+            shortcut="S"
+            disabled={nothing || !props.sendAvailable || props.sendState !== "idle"}
+            onClick={props.onSend}
+            sendState={props.sendState}
+          >
+            {props.sendState === "sending" ? (
+              <LoaderCircle className="animate-spin" />
+            ) : props.sendState === "sent" ? (
+              <Check className="text-[var(--annotate-success)]" />
+            ) : props.sendState === "failed" ? (
+              <CircleAlert className="text-destructive" />
+            ) : (
+              <Send />
+            )}
+          </NotchDockButton>
+          <NotchDockButton
+            {...sharedDockProps(10)}
+            tone="destructive"
+            label="Clear all"
+            shortcut="X"
+            disabled={nothing}
+            onClick={props.onClear}
+          >
+            <Trash2 />
+          </NotchDockButton>
+        </div>
+
+        <ToolbarDivider orientation="horizontal" />
+
+        {/* Side switch, settings & exit */}
+        <div className="flex flex-col items-center">
+          <NotchDockButton
+            {...sharedDockProps(11)}
+            label={isRight ? "Move notch to left side" : "Move notch to right side"}
+            onClick={props.onToggleDockSide}
+          >
+            {isRight ? <PanelLeft /> : <PanelRight />}
+          </NotchDockButton>
+          <NotchDockButton
+            {...sharedDockProps(12)}
+            label="Settings"
+            pressed={props.settingsOpen}
+            onClick={props.onToggleSettings}
+          >
+            <Settings />
+          </NotchDockButton>
+          <NotchDockButton {...sharedDockProps(13)} label="Exit" onClick={props.onExit}>
+            <X />
+          </NotchDockButton>
+        </div>
+      </div>
+
+      {/* Contextual secondary tray: floats cleanly at the bottom edge aligned with the notch side. */}
       <div
         data-annotate-toolbar-tray={showTray ? "" : undefined}
         className={cn(
           showTray
             ? cn(
-                "annotate-enter flex max-w-full flex-wrap items-center gap-1.5 rounded-xl px-2 py-1 text-xs",
+                "annotate-enter pointer-events-auto fixed bottom-4 z-30 flex max-w-[calc(100vw-88px)] flex-wrap items-center gap-1.5 rounded-xl px-2 py-1 text-xs",
                 SURFACE_CLASS,
+                isRight
+                  ? "right-[var(--annotate-inset-right,64px)]"
+                  : "left-[var(--annotate-inset-left,64px)]",
               )
             : "sr-only",
         )}
@@ -372,152 +946,6 @@ export function Toolbar(props: ToolbarProps) {
         >
           {props.status}
         </span>
-      </div>
-
-      {/* Main bar: stable 4-zone layout (grip | modes | canvas & output | settings & exit). */}
-      <div
-        className={cn(
-          "flex max-w-full items-center gap-1 rounded-2xl px-1.5 py-1.5",
-          SURFACE_CLASS,
-        )}
-      >
-        {props.dragHandlers && (
-          <button
-            type="button"
-            aria-label="Move toolbar"
-            title="Drag to move toolbar"
-            data-annotate-toolbar-grip=""
-            className="flex h-7 w-5 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground/60 transition-colors outline-none hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 active:cursor-grabbing"
-            {...props.dragHandlers}
-          >
-            <GripVertical aria-hidden className="size-3.5" />
-          </button>
-        )}
-
-        <SegmentedControl className="rounded-xl p-0.5">
-          <ToolbarButton
-            tone="mode"
-            label="Annotate"
-            pressed={mode === "annotate"}
-            onClick={() => props.onSelectMode?.("annotate")}
-          >
-            <MousePointerClick />
-          </ToolbarButton>
-          <ToolbarButton
-            tone="mode"
-            label="Spacing inspector"
-            shortcut="M"
-            pressed={mode === "spacing"}
-            onClick={() => props.onSelectMode?.(mode === "spacing" ? "annotate" : "spacing")}
-          >
-            <RulerDimensionLine />
-          </ToolbarButton>
-          <ToolbarButton
-            tone="mode"
-            label="Type inspector"
-            shortcut="T"
-            pressed={mode === "type"}
-            onClick={() => props.onSelectMode?.(mode === "type" ? "annotate" : "type")}
-          >
-            <Type />
-          </ToolbarButton>
-          <ToolbarButton
-            tone="mode"
-            label="Colour inspector"
-            shortcut="K"
-            pressed={mode === "color"}
-            onClick={() => props.onSelectMode?.(mode === "color" ? "annotate" : "color")}
-          >
-            <Pipette />
-          </ToolbarButton>
-          <ToolbarButton
-            tone="mode"
-            label="Layout"
-            shortcut="L"
-            pressed={mode === "layout"}
-            onClick={() => props.onSelectMode?.(mode === "layout" ? "annotate" : "layout")}
-          >
-            <LayoutGrid />
-          </ToolbarButton>
-          <ToolbarButton
-            tone="mode"
-            label="Rearrange"
-            shortcut="R"
-            pressed={mode === "rearrange"}
-            onClick={() => props.onSelectMode?.(mode === "rearrange" ? "annotate" : "rearrange")}
-          >
-            <Move />
-          </ToolbarButton>
-        </SegmentedControl>
-
-        <ToolbarDivider />
-
-        <div className="flex items-center gap-0.5">
-          <ToolbarButton
-            tone="warning"
-            label={props.frozen ? "Unfreeze" : "Freeze"}
-            shortcut="P"
-            pressed={props.frozen}
-            onClick={props.onToggleFreeze}
-          >
-            {props.frozen ? <Play /> : <Pause />}
-          </ToolbarButton>
-          <ToolbarButton
-            label={props.markersHidden ? "Show markers" : "Hide markers"}
-            shortcut="H"
-            pressed={props.markersHidden}
-            disabled={empty && !props.placementCount}
-            onClick={props.onToggleMarkers}
-          >
-            {props.markersHidden ? <EyeOff /> : <Eye />}
-          </ToolbarButton>
-          <ToolbarButton
-            tone={props.copied ? "success" : "action"}
-            label="Copy"
-            shortcut="C"
-            disabled={nothing}
-            onClick={props.onCopy}
-          >
-            {props.copied ? <Check /> : <Copy />}
-          </ToolbarButton>
-          <ToolbarButton
-            label="Send Annotations"
-            shortcut="S"
-            disabled={nothing || !props.sendAvailable || props.sendState !== "idle"}
-            onClick={props.onSend}
-            sendState={props.sendState}
-          >
-            {props.sendState === "sending" ? (
-              <LoaderCircle className="animate-spin" />
-            ) : props.sendState === "sent" ? (
-              <Check className="text-[var(--annotate-success)]" />
-            ) : props.sendState === "failed" ? (
-              <CircleAlert className="text-destructive" />
-            ) : (
-              <Send />
-            )}
-          </ToolbarButton>
-          <ToolbarButton
-            tone="destructive"
-            label="Clear all"
-            shortcut="X"
-            disabled={nothing}
-            onClick={props.onClear}
-          >
-            <Trash2 />
-          </ToolbarButton>
-        </div>
-
-        <ToolbarDivider />
-
-        <div className="flex items-center gap-0.5">
-          <ToolbarButton label="Settings" pressed={props.settingsOpen} onClick={props.onToggleSettings}>
-            <Settings />
-          </ToolbarButton>
-          <ToolbarButton label="Exit" onClick={props.onExit}>
-            <X />
-          </ToolbarButton>
-        </div>
       </div>
     </ToolbarPrimitive>
   );
