@@ -708,7 +708,7 @@ function BoxInspector({ ctx }: { ctx: InspectorContext }) {
       let mode: SizingMode;
       if (pendingVal === "100%" || pendingVal === "100vh") {
         mode = "fill";
-      } else if (pendingVal === "fit-content") {
+      } else if (pendingVal === "fit-content" || pendingVal === "min-content") {
         mode = "hug";
       } else if (pendingVal) {
         mode = "fixed";
@@ -742,43 +742,48 @@ function BoxInspector({ ctx }: { ctx: InspectorContext }) {
       };
 
       const syncGridTracks = (anchorMode: SizingMode | null, fixedPx?: number) => {
-        if (!isGridParent || !parent || axis !== "width") return;
+        if (!isGridParent || !parent) return;
+        const trackProp = axis === "width" ? "grid-template-columns" : "grid-template-rows";
+        const rawTracks = (axis === "width" ? parentCs?.gridTemplateColumns : parentCs?.gridTemplateRows) ?? "";
+        const trackCount = rawTracks.trim().split(/\s+/).filter(Boolean).length;
         const siblings = Array.from(parent.children).filter(
           (c) => !["script", "style", "template"].includes(c.localName) && c !== surface.host,
         );
-        const colCount = (parentCs?.gridTemplateColumns ?? "").trim().split(/\s+/).filter(Boolean).length;
-        if (siblings.length <= 1 || siblings.length !== colCount) return;
+        if (siblings.length <= 1 || siblings.length !== trackCount) return;
 
-        let anyNonFill = false;
-        const tracks = siblings.map((sib) => {
+        const specs = siblings.map((sib) => {
           if (sib === anchor) {
-            if (anchorMode === null || anchorMode === "fill") return "minmax(0, 1fr)";
-            anyNonFill = true;
-            return anchorMode === "hug" ? "auto" : `${Math.max(0, Math.round(fixedPx ?? livePx))}px`;
+            if (anchorMode === null || anchorMode === "fill") return { kind: "fill" as const };
+            if (anchorMode === "hug") return { kind: "hug" as const };
+            return { kind: "fixed" as const, px: Math.max(0, Math.round(fixedPx ?? livePx)) };
           }
-          const sibRec = styles.findFor(sib, "width")?.styleChange?.to.value;
-          if (sibRec === "fit-content") {
-            anyNonFill = true;
-            return "auto";
+          const sibRec = styles.findFor(sib, axis)?.styleChange?.to.value;
+          if (sibRec === "fit-content" || sibRec === "min-content") return { kind: "hug" as const };
+          if (sibRec && sibRec !== "100%" && sibRec !== "100vh" && sibRec.endsWith("px")) {
+            return { kind: "fixed" as const, px: Math.round(Number.parseFloat(sibRec) || 0) };
           }
-          if (sibRec && sibRec !== "100%" && sibRec.endsWith("px")) {
-            anyNonFill = true;
-            return sibRec;
-          }
-          return "minmax(0, 1fr)";
+          return { kind: "fill" as const };
         });
 
-        const parentRec = styles.findFor(parent, "grid-template-columns");
+        const anyNonFill = specs.some((s) => s.kind !== "fill");
+        const tracks = specs.map((spec) => {
+          if (spec.kind === "fill") return "minmax(0, 1fr)";
+          // Use min-content for Hug tracks (not `auto`, which stretches to fill leftover grid space when no fr tracks exist).
+          if (spec.kind === "hug") return "min-content";
+          return `${spec.px}px`;
+        });
+
+        const parentRec = styles.findFor(parent, trackProp);
         if (!anyNonFill) {
           if (parentRec) styles.remove(parentRec.id);
           return;
         }
         styles.upsert({
           category: "spacing",
-          property: "grid-template-columns",
-          groupId: `size-grid:${elementSerial(parent)}:cols`,
+          property: trackProp,
+          groupId: `size-grid:${elementSerial(parent)}:${axis}`,
           elements: [parent],
-          from: parentRec?.styleChange?.from ?? { value: parentCs?.gridTemplateColumns ?? "" },
+          from: parentRec?.styleChange?.from ?? { value: rawTracks },
           to: { value: tracks.join(" ") },
           detail: { name: memberLabel(parent) },
         });
@@ -793,13 +798,15 @@ function BoxInspector({ ctx }: { ctx: InspectorContext }) {
           !isCrossAxis &&
           !isGridParent &&
           (anchor === document.body || parent === document.body || parent === document.documentElement);
+        // On a grid width column, Hug uses min-content so a Fill sibling pushes it to its minimum instead of unwrapping text.
+        const hugVal = isGridParent && axis === "width" ? "min-content" : "fit-content";
         const sizeVal =
           next === "fill"
             ? useViewportHeight
               ? "100vh"
               : "100%"
             : next === "hug"
-              ? "fit-content"
+              ? hugVal
               : `${Math.max(0, Math.round(fixedPx ?? livePx))}px`;
         upsertProp(axis, `${livePx}px`, sizeVal);
 

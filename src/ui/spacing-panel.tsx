@@ -506,6 +506,8 @@ function RadiusTab({ radius }: { radius: RadiusControlProps }) {
 
 function AxisSizingRow({ label, axis }: { label: string; axis: AxisSizingProps }) {
   const [draft, setDraft] = useState<string | null>(null);
+  const [pickingFixed, setPickingFixed] = useState(false);
+  const displayMode: SizingMode = pickingFixed ? "fixed" : axis.mode;
   const val = draft ?? String(axis.px);
 
   return (
@@ -529,6 +531,7 @@ function AxisSizingRow({ label, axis }: { label: string; axis: AxisSizingProps }
               className="size-5 text-muted-foreground hover:text-foreground"
               onClick={() => {
                 setDraft(null);
+                setPickingFixed(false);
                 axis.onReset();
               }}
             >
@@ -540,7 +543,7 @@ function AxisSizingRow({ label, axis }: { label: string; axis: AxisSizingProps }
 
       <SegmentedControl className="grid w-full grid-cols-3" role="group" aria-label={`${label} sizing mode`}>
         {(["fill", "hug", "fixed"] as const).map((m) => {
-          const active = axis.mode === m;
+          const active = displayMode === m;
           return (
             <button
               key={m}
@@ -555,6 +558,7 @@ function AxisSizingRow({ label, axis }: { label: string; axis: AxisSizingProps }
               )}
               onClick={() => {
                 setDraft(null);
+                setPickingFixed(m === "fixed");
                 axis.onMode(m);
               }}
             >
@@ -564,7 +568,7 @@ function AxisSizingRow({ label, axis }: { label: string; axis: AxisSizingProps }
         })}
       </SegmentedControl>
 
-      {axis.mode === "fixed" && (
+      {displayMode === "fixed" && (
         <div className="flex h-7 items-center rounded-lg border border-border/70 bg-background/90 p-0.5 shadow-2xs focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20 dark:bg-background/50">
           <Button
             variant="ghost"
