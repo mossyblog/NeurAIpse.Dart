@@ -33,6 +33,8 @@ export type LayoutModeProps = {
   placements: readonly PlacementAnnotation[];
   /** Layout mode is on: palette, drop, select, move, resize and keys. Off: outlines only. */
   interactive: boolean;
+  /** Show numbered marker and comment badges (hidden when overlay is collapsed for a clean preview). */
+  showChrome?: boolean;
   accent: string;
   surface: Surface;
   attributeNames: readonly string[];
@@ -104,7 +106,7 @@ function TextEditor({ initial, onDone }: { initial: string; onDone: (value: stri
  * by the scroll, like markers) and stay visible as numbered outlines outside the mode.
  */
 export function LayoutMode(props: LayoutModeProps) {
-  const { placements, interactive, surface, attributeNames, apply } = props;
+  const { placements, interactive, showChrome = true, surface, attributeNames, apply } = props;
   const [armed, setArmed] = useState<PaletteItem | null>(null);
   const [ghost, setGhost] = useState<Point | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
@@ -463,18 +465,20 @@ export function LayoutMode(props: LayoutModeProps) {
                   }}
                 />
               )}
-              <span
-                aria-hidden
-                data-annotate-placement-marker={index + 1}
-                className={cn(
-                  "absolute flex size-6 items-center justify-center rounded-md font-mono text-[11px] font-semibold text-white tabular-nums shadow-sm ring-2 ring-background",
-                  markerInset ? "top-1.5 left-1.5" : "top-0 right-full mr-2",
-                )}
-                style={{ backgroundColor: props.accent, textShadow: "0 1px 1px rgba(0, 0, 0, 0.3)" }}
-              >
-                {index + 1}
-              </span>
-              {p.comment && (
+              {showChrome && (
+                <span
+                  aria-hidden
+                  data-annotate-placement-marker={index + 1}
+                  className={cn(
+                    "absolute flex size-6 items-center justify-center rounded-md font-mono text-[11px] font-semibold text-white tabular-nums shadow-sm ring-2 ring-background",
+                    markerInset ? "top-1.5 left-1.5" : "top-0 right-full mr-2",
+                  )}
+                  style={{ backgroundColor: props.accent, textShadow: "0 1px 1px rgba(0, 0, 0, 0.3)" }}
+                >
+                  {index + 1}
+                </span>
+              )}
+              {showChrome && p.comment && (
                 <span
                   aria-hidden
                   data-annotate-placement-has-comment=""

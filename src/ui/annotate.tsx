@@ -46,7 +46,7 @@ import { markerColor } from "./colors.ts";
 import { Highlight, type HoverTarget } from "./highlight.tsx";
 import { Launcher } from "./launcher.tsx";
 import { LayoutMode } from "./layout-mode.tsx";
-import { RearrangeMode } from "./rearrange-mode.tsx";
+import { RearrangeMode, useRearrangePreview } from "./rearrange-mode.tsx";
 import { rearrangeItems } from "../core/rearrange-output.ts";
 import { Markers } from "./markers.tsx";
 import { Popup } from "./popup.tsx";
@@ -293,7 +293,7 @@ export function Annotate({
     annotations,
     commit,
     attributeNames,
-    previewEnabled: active && mode !== "annotate",
+    previewEnabled: true,
     sourceFor: (el) => (settings.reactEnabled ? getReactInfo(el, settingsReactMode(settings)).sourceFile : undefined),
     enrich: (el, apply) => {
       if (!settings.reactEnabled) return;
@@ -314,6 +314,7 @@ export function Annotate({
       void notifyWebhook("annotation.delete", { annotation });
     },
   });
+  const rearrangePreview = useRearrangePreview(annotations);
 
   useEffect(() => {
     latest.current = { route, annotations };
@@ -891,6 +892,7 @@ export function Annotate({
             attributeNames,
             annotations,
             commit,
+            rearrangePreview,
             color: accent,
             sourceFor: (el) => (settings.reactEnabled ? getReactInfo(el, settingsReactMode(settings)).sourceFile : undefined),
             onAdd: (annotation) => {
@@ -911,11 +913,12 @@ export function Annotate({
           }}
         />
       )}
-      {active && (mode === "layout" || (!markersHidden && placements.length > 0)) && (
+      {((active && mode === "layout") || ((!active || !markersHidden) && placements.length > 0)) && (
         <LayoutMode
-          key={mode === "layout" ? "edit" : "view"}
+          key={active && mode === "layout" ? "edit" : "view"}
           placements={placements}
-          interactive={mode === "layout"}
+          interactive={active && mode === "layout"}
+          showChrome={active}
           accent={accent}
           surface={surface}
           attributeNames={attributeNames}
