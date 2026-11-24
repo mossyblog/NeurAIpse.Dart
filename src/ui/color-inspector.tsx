@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useEffectEvent, useState } from "react";
+import { Button } from "./primitives.tsx";
 import { cn } from "cn";
+import { RotateCcw } from "lucide-react";
 import { colorKey, composite, contrastRatio, formatRatio, parseColor, toHex, wcagRating, type RGBA } from "../core/color.ts";
 import { backgroundBehind, colorProperties, computedColor, resolveColorValue } from "../core/inspect-dom.ts";
 import type { StyleValue } from "../core/style-change.ts";
 import { colorTokens } from "../core/token-catalog.ts";
-import { FIELD_CLASS, SectionLabel } from "./chrome.tsx";
+import { FIELD_CLASS, SectionLabel, SegmentedControl } from "./chrome.tsx";
 import { GroupOverlay } from "./group-overlay.tsx";
 import { EDIT_NOT_FOUND, type InspectorContext } from "./inspector-context.ts";
-import { PanelFrame } from "./inspector-panel.tsx";
-import { StyleRow } from "./style-row.tsx";
+import { FlagBadges, PanelFrame } from "./inspector-panel.tsx";
 import { memberLabel } from "./use-style-changes.ts";
 import { useElementPicker } from "./use-element-picker.ts";
 
@@ -21,6 +22,12 @@ let groupCounter = 0;
 
 /** Resolver property for a colour property (`border-color` is read from the top side). */
 export const colorLonghand = (p: string) => (p === "border-color" ? "border-top-color" : p);
+
+const PROPERTY_TAB_LABEL: Record<string, string> = {
+  color: "Text",
+  "background-color": "Background",
+  "border-color": "Border",
+};
 
 const hexOf = (value: string, context?: Element) => {
   const c = resolveColorValue(value, context);
@@ -58,6 +65,8 @@ function sameColorElements(anchor: Element, property: string, isOverlay: (el: El
 export function ColorInspector({ ctx }: { ctx: InspectorContext }) {
   const { surface, resolver, styles } = ctx;
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [draft, setDraft] = useState<{ key: string; value: string; invalid: boolean } | null>(null);
+
   const isOverlay = (el: Element) => el === surface.host || el.getRootNode() === surface.shadow;
   const defaultProperty = (el: Element) => {
     const props = colorProperties(el);
@@ -95,6 +104,7 @@ export function ColorInspector({ ctx }: { ctx: InspectorContext }) {
     surface,
     resolve: (el) => (isOverlay(el) ? null : el),
     onPick: (el, shift) => {
+      setDraft(null);
       if (shift && selection) {
         const members = selection.members.includes(el) ? selection.members.filter((m) => m !== el) : [...selection.members, el];
         if (!members.length) return;
@@ -127,6 +137,7 @@ export function ColorInspector({ ctx }: { ctx: InspectorContext }) {
     if (a?.styleChange?.category !== "color" || !a.styleDetail?.groupId) return;
     const members = styles.reattach(a);
     if (!members.length) return ctx.notify(EDIT_NOT_FOUND);
+    setDraft(null);
     setSelection({ anchor: members[0], members, property: a.styleChange.property, sameColor: members.length > 1, groupId: a.styleDetail.groupId, base: a.styleDetail.groupId.split(":")[0] });
   });
   useEffect(() => {
@@ -189,8 +200,28 @@ export function ColorInspector({ ctx }: { ctx: InspectorContext }) {
   const computed = sel ? computedColor(sel.anchor, property) : "";
   const currentHex = sel ? hexOf(pending?.from.value ?? computed, sel.anchor) : undefined;
   const nextColor = sel && pending ? resolveColorValue(pending.to.token ? `var(${pending.to.token})` : pending.to.value, sel.anchor) : undefined;
+  const nextHex = nextColor ? toHex(nextColor) : undefined;
+  const activeHex = nextHex ?? currentHex;
+  const activeToken = pending?.to.token ?? (res?.status === "token" ? res.token : undefined);
   const live = sel && (property === "color" || property === "background-color") ? contrastFor(property, nextColor) : null;
   const rating = live ? wcagRating(live.ratio) : null;
+  const availableProps = sel ? colorProperties(sel.anchor) : [];
+  const rawFlags = pending ? (pendingFor(property)?.styleDetail?.flags ?? []) : (res?.flags ?? []);
+  const visibleFlags = tokens.length > 0 ? rawFlags : rawFlags.filter((f) => f !== "no token");
+  const sameMatches = sel ? sameColorElements(sel.anchor, property, isOverlay, pending?.from.value, sel.members) : [];
+  const showScope = Boolean(sel && (sameMatches.length > 1 || sel.sameColor));
+
+  const draftKey = sel ? `${sel.groupId}-${property}-${pending?.to.token ?? ""}` : "";
+  const activeDraft = draft && draft.key === draftKey ? draft : null;
+  const inputValue = activeDraft?.value ?? (pending && !pending.to.token ? pending.to.value : (currentHex ?? computed));
+
+  const commitRaw = (v: string) => {
+    const value = v.trim();
+    const ok = value !== "" && CSS.supports("color", value) && !/[;{}<>\\]/.test(value);
+    setDraft({ key: draftKey, value: v, invalid: !ok });
+    if (ok) set(property, { value });
+  };
+
   void picker.tick;
 
   return (
@@ -201,114 +232,125 @@ export function ColorInspector({ ctx }: { ctx: InspectorContext }) {
           label="Colour inspector"
           kind="color"
           elementName={sel ? memberLabel(sel.anchor) : "Colour"}
-          regionLabel={sel ? property : "Click an element to pick its colours"}
-          count={sel?.members.length}
+          regionLabel={sel ? (PROPERTY_TAB_LABEL[property] ?? property) : "Click an element to pick its colours"}
+          count={sel && sel.members.length > 1 ? sel.members.length : undefined}
           pending={ctx.pending}
           onRemove={(id) => styles.remove(id)}
           onEdit={ctx.onEdit}
           onCopy={ctx.onCopy}
         >
           {sel && (
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-col gap-1.5 rounded-lg bg-muted/40 p-2 ring-1 ring-foreground/[0.06] dark:ring-white/[0.07]">
-                <label className="flex cursor-pointer items-center justify-between gap-2 text-xs select-none">
-                  <span className="font-medium text-foreground">Same color</span>
-                  <input
-                    type="checkbox"
-                    data-annotate-same-color
-                    className="size-3.5 cursor-pointer rounded border-border accent-primary outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    checked={sel.sameColor}
-                    onChange={(event) => {
-                      const next = select(sel.anchor, property, event.target.checked, sel.base);
-                      setSelection(next);
-                      syncMembers(next);
-                    }}
-                  />
-                </label>
-                <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-1.5">
-                  <span className="shrink-0 text-[11px] text-muted-foreground">Property</span>
-                  <select
-                    aria-label="Colour property"
-                    data-annotate-color-property
-                    className={cn(FIELD_CLASS, "min-w-0 flex-1 font-mono")}
-                    value={property}
-                    onChange={(event) => setSelection(select(sel.anchor, event.target.value, undefined, sel.base))}
-                  >
-                    {colorProperties(sel.anchor).map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <StyleRow
-                key={`${sel.groupId}-${property}`}
-                property={property}
-                current={pending?.from ?? { value: currentHex ?? computed, ...(res?.status === "token" && res.token ? { token: res.token } : {}) }}
-                next={pending?.to}
-                computed={computed}
-                flags={pending ? (pendingFor(property)?.styleDetail?.flags ?? []) : (res?.flags ?? [])}
-                tokens={tokens.map((t) => ({ id: t.token, label: `${t.token} · ${t.hex}` }))}
-                selectedToken={pending?.to.token}
-                onToken={(id) => {
-                  const t = tokens.find((x) => x.token === id);
-                  if (t) set(property, { value: t.hex ?? "", token: t.token });
-                }}
-                rawValue={pending && !pending.to.token ? pending.to.value : (currentHex ?? computed)}
-                units={[]}
-                unit=""
-                onRaw={(v) => {
-                  const value = v.trim();
-                  const ok = value !== "" && CSS.supports("color", value) && !/[;{}<>\\]/.test(value);
-                  if (ok) set(property, { value });
-                  return ok;
-                }}
-                onReset={() => {
-                  const a = pendingFor(property);
-                  if (a) styles.remove(a.id);
-                }}
-                swatch={{ current: currentHex, next: nextColor ? toHex(nextColor) : undefined }}
-              >
-                {tokens.length > 0 && (
-                  <div className="flex flex-col gap-1 pt-0.5" data-annotate-color-swatches>
-                    <SectionLabel meta={<span className="font-mono tabular-nums">{tokens.length}</span>}>Theme swatches</SectionLabel>
-                    <div className="annotate-scroll grid max-h-28 grid-cols-8 gap-1.5 overflow-y-auto rounded-md bg-background/60 p-1.5 ring-1 ring-foreground/[0.05] dark:bg-background/35 dark:ring-white/[0.06]">
-                      {tokens.map((t) => {
-                        const active = pending?.to.token === t.token;
-                        return (
-                          <button
-                            key={t.token}
-                            type="button"
-                            aria-label={`${t.token} (${t.hex ?? ""})`}
-                            aria-pressed={active}
-                            title={`${t.token} · ${t.hex ?? ""}`}
-                            onClick={() => set(property, { value: t.hex ?? "", token: t.token })}
-                            className={cn(
-                              "aspect-square w-full cursor-pointer rounded-md border border-foreground/15 transition-transform outline-none hover:scale-110 focus-visible:ring-2 focus-visible:ring-ring dark:border-white/15",
-                              active && "scale-105 ring-2 ring-foreground ring-offset-1 ring-offset-background",
-                            )}
-                            style={{ backgroundColor: t.hex }}
-                          />
-                        );
-                      })}
+            <div className="flex flex-col gap-3" data-annotate-panel-row={property}>
+              {availableProps.length > 1 && (
+                <SegmentedControl
+                  className="grid w-full"
+                  style={{ gridTemplateColumns: `repeat(${availableProps.length}, minmax(0, 1fr))` }}
+                  role="group"
+                  aria-label="Colour property"
+                  data-annotate-color-property={property}
+                >
+                  {availableProps.map((p) => {
+                    const active = p === property;
+                    return (
+                      <button
+                        key={p}
+                        type="button"
+                        aria-pressed={active}
+                        className={cn(
+                          "h-6 cursor-pointer truncate rounded-md px-2 text-[11px] font-medium transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                          active
+                            ? "bg-background text-foreground shadow-2xs ring-1 ring-foreground/[0.08] dark:bg-foreground/15 dark:ring-white/10"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                        onClick={() => {
+                          setDraft(null);
+                          setSelection(select(sel.anchor, p, undefined, sel.base));
+                        }}
+                      >
+                        {PROPERTY_TAB_LABEL[p] ?? p}
+                      </button>
+                    );
+                  })}
+                </SegmentedControl>
+              )}
+
+              <div className="flex flex-col gap-2.5 rounded-xl border border-border/50 bg-muted/35 p-3">
+                <div className="flex items-center gap-3">
+                  <div className="relative size-10 shrink-0 overflow-hidden rounded-lg shadow-xs ring-1 ring-inset ring-foreground/15 dark:ring-white/15">
+                    <span
+                      aria-hidden
+                      className="block size-full"
+                      style={{ backgroundColor: activeHex ?? "transparent" }}
+                    />
+                    {pending && currentHex && nextHex && currentHex !== nextHex && (
+                      <span
+                        aria-hidden
+                        title={`Original: ${currentHex}`}
+                        className="absolute right-0.5 bottom-0.5 size-3 rounded-[4px] ring-1 ring-background"
+                        style={{ backgroundColor: currentHex }}
+                      />
+                    )}
+                  </div>
+
+                  <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span
+                        data-annotate-current={!pending ? "" : undefined}
+                        data-annotate-new={pending ? "" : undefined}
+                        className="truncate font-mono text-xs font-semibold text-foreground tabular-nums"
+                      >
+                        {activeHex ?? computed}
+                      </span>
+                      {pending && (
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          data-annotate-reset
+                          className="h-5 shrink-0 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                          onClick={() => {
+                            setDraft(null);
+                            const a = pendingFor(property);
+                            if (a) styles.remove(a.id);
+                          }}
+                        >
+                          <RotateCcw className="size-3" />
+                          Reset
+                        </Button>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1">
+                      {activeToken && (
+                        <span
+                          className="max-w-full truncate rounded-md bg-background/80 px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground ring-1 ring-foreground/[0.06] dark:bg-background/45 dark:ring-white/[0.08]"
+                          title={activeToken}
+                        >
+                          {activeToken}
+                        </span>
+                      )}
+                      {pending && currentHex && (
+                        <span data-annotate-current className="font-mono text-[10px] text-muted-foreground/80 tabular-nums">
+                          was {currentHex}
+                        </span>
+                      )}
+                      <FlagBadges flags={visibleFlags} />
                     </div>
                   </div>
-                )}
+                </div>
+
                 {live && rating && (
                   <div
-                    className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 rounded-md bg-background/70 px-2 py-1.5 text-[11px] ring-1 ring-foreground/[0.05] dark:bg-background/40 dark:ring-white/[0.06]"
+                    className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-t border-border/50 pt-2 text-[11px]"
                     data-annotate-contrast={formatRatio(live.ratio)}
                     data-annotate-contrast-background={toHex(live.background)}
                   >
                     <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
                       <span>Contrast</span>
-                      <span className="font-mono font-medium text-foreground tabular-nums">{formatRatio(live.ratio)}</span>
-                      <span>on</span>
-                      <span className="inline-flex items-center gap-1 font-mono text-foreground tabular-nums">
+                      <span className="font-mono font-semibold text-foreground tabular-nums">{formatRatio(live.ratio)}</span>
+                      <span className="text-muted-foreground/60">on</span>
+                      <span className="inline-flex items-center gap-1 font-mono text-foreground/90 tabular-nums">
                         <span
                           aria-hidden
-                          className="inline-block size-2.5 shrink-0 rounded-[2px] ring-1 ring-foreground/20 dark:ring-white/20"
+                          className="inline-block size-2.5 shrink-0 rounded-[3px] ring-1 ring-foreground/20 dark:ring-white/20"
                           style={{ backgroundColor: toHex(live.background) }}
                         />
                         {toHex(live.background)}
@@ -327,7 +369,108 @@ export function ColorInspector({ ctx }: { ctx: InspectorContext }) {
                     </span>
                   </div>
                 )}
-              </StyleRow>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <SectionLabel>Value</SectionLabel>
+                <div className="relative flex items-center">
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute left-2.5 size-3.5 rounded-[4px] ring-1 ring-foreground/20 dark:ring-white/20"
+                    style={{ backgroundColor: activeHex ?? "transparent" }}
+                  />
+                  <input
+                    aria-label={`${property} value`}
+                    aria-invalid={activeDraft?.invalid || undefined}
+                    data-annotate-raw-input
+                    placeholder="#000000, rgb(), oklch()"
+                    className={cn(
+                      FIELD_CLASS,
+                      "h-8 w-full rounded-lg pl-8 font-mono text-xs tabular-nums",
+                      activeDraft?.invalid && "border-destructive",
+                    )}
+                    value={inputValue}
+                    onChange={(event) => commitRaw(event.target.value)}
+                    onBlur={() => {
+                      if (activeDraft && !activeDraft.invalid) setDraft(null);
+                    }}
+                  />
+                </div>
+              </div>
+
+              {tokens.length > 0 && (
+                <div className="flex flex-col gap-1.5" data-annotate-color-swatches>
+                  <SectionLabel meta={<span className="font-mono text-[10px] text-muted-foreground tabular-nums">{tokens.length}</span>}>
+                    Tokens
+                  </SectionLabel>
+                  <div className="annotate-scroll grid max-h-32 grid-cols-7 gap-1.5 overflow-y-auto rounded-xl border border-border/50 bg-muted/25 p-2">
+                    {tokens.map((t) => {
+                      const active = pending?.to.token === t.token;
+                      return (
+                        <button
+                          key={t.token}
+                          type="button"
+                          aria-label={`${t.token} (${t.hex ?? ""})`}
+                          aria-pressed={active}
+                          title={`${t.token} · ${t.hex ?? ""}`}
+                          onClick={() => {
+                            setDraft(null);
+                            set(property, { value: t.hex ?? "", token: t.token });
+                          }}
+                          className={cn(
+                            "aspect-square w-full cursor-pointer rounded-md border border-foreground/15 transition-transform outline-none hover:scale-110 focus-visible:ring-2 focus-visible:ring-ring dark:border-white/15",
+                            active && "scale-105 ring-2 ring-foreground ring-offset-2 ring-offset-background",
+                          )}
+                          style={{ backgroundColor: t.hex }}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {showScope && (
+                <div className="flex flex-col gap-1.5">
+                  <SectionLabel>Scope</SectionLabel>
+                  <SegmentedControl className="grid w-full grid-cols-2" role="group" aria-label="Color scope">
+                    <button
+                      type="button"
+                      aria-pressed={!sel.sameColor}
+                      className={cn(
+                        "h-6 cursor-pointer rounded-md px-2 text-[11px] font-medium transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                        !sel.sameColor
+                          ? "bg-background text-foreground shadow-2xs ring-1 ring-foreground/[0.08] dark:bg-foreground/15 dark:ring-white/10"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => {
+                        const next = select(sel.anchor, property, false, sel.base);
+                        setSelection(next);
+                        syncMembers(next);
+                      }}
+                    >
+                      This element
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={sel.sameColor}
+                      data-annotate-same-color=""
+                      className={cn(
+                        "h-6 cursor-pointer truncate rounded-md px-2 text-[11px] font-medium tabular-nums transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                        sel.sameColor
+                          ? "bg-background text-foreground shadow-2xs ring-1 ring-foreground/[0.08] dark:bg-foreground/15 dark:ring-white/10"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => {
+                        const next = select(sel.anchor, property, true, sel.base);
+                        setSelection(next);
+                        syncMembers(next);
+                      }}
+                    >
+                      {`All ${sameMatches.length} matching`}
+                    </button>
+                  </SegmentedControl>
+                </div>
+              )}
             </div>
           )}
         </PanelFrame>

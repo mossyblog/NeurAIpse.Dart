@@ -53,7 +53,7 @@ export function RearrangePanel(props: RearrangePanelProps) {
   };
 
   const footer = (
-    <Button variant="outline" size="sm" className="w-full" data-annotate-panel-copy disabled={props.rows.length === 0} onClick={handleCopy}>
+    <Button variant="outline" size="sm" className="w-full rounded-lg" data-annotate-panel-copy disabled={props.rows.length === 0} onClick={handleCopy}>
       {copied ? <Check /> : <Copy />}
       {copied ? "Copied" : "Copy"}
     </Button>
@@ -80,13 +80,19 @@ export function RearrangePanel(props: RearrangePanelProps) {
       }}
     >
       <div className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1.5">
-          <SectionLabel meta={<span className="font-mono text-[11px] text-muted-foreground tabular-nums">{props.rows.length}</span>}>
+        <div className="flex flex-col gap-2">
+          <SectionLabel
+            meta={
+              props.rows.length > 0 ? (
+                <span className="font-mono text-[10px] text-muted-foreground tabular-nums">{props.rows.length}</span>
+              ) : undefined
+            }
+          >
             Rearrangements
           </SectionLabel>
           {props.rows.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border/70 px-3 py-4 text-center text-xs text-muted-foreground">
-              No rearrangements yet.
+            <div className="rounded-xl border border-border/40 bg-muted/25 px-3 py-3 text-center text-xs text-muted-foreground">
+              Click or drag any element to move or resize it.
             </div>
           ) : (
             <ol className="flex flex-col gap-1.5" data-annotate-rearrange-list>
@@ -95,15 +101,18 @@ export function RearrangePanel(props: RearrangePanelProps) {
                   key={row.id}
                   data-annotate-rearrange-item={row.id}
                   data-found={row.found}
-                  className="flex items-start justify-between gap-2 rounded-lg bg-muted/45 p-2 text-xs ring-1 ring-foreground/[0.06] dark:ring-white/[0.07]"
+                  className="group flex items-start justify-between gap-2 rounded-xl border border-border/50 bg-muted/35 p-2.5 text-xs transition-colors hover:border-border/80 hover:bg-muted/50"
                 >
-                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="flex min-w-0 flex-1 flex-col gap-1">
                     <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-background/80 font-mono text-[10px] font-medium text-muted-foreground tabular-nums ring-1 ring-foreground/[0.06] dark:bg-background/45 dark:ring-white/[0.08]">
+                        {index + 1}
+                      </span>
                       <span className="truncate font-medium text-foreground" title={row.annotation.rearrange?.selector}>
-                        <span className="font-mono text-muted-foreground tabular-nums">{index + 1}.</span> {row.label}
+                        {row.label}
                       </span>
                       {row.removed && (
-                        <Badge variant="destructive" className="h-4 shrink-0 rounded px-1 text-[10px] leading-none">
+                        <Badge variant="destructive" className="h-4 shrink-0 rounded-md px-1.5 text-[10px] leading-none">
                           Removed
                         </Badge>
                       )}
@@ -117,7 +126,7 @@ export function RearrangePanel(props: RearrangePanelProps) {
                       </span>
                     )}
                   </span>
-                  <span className="flex shrink-0 items-center gap-0.5">
+                  <span className="flex shrink-0 items-center gap-0.5 text-muted-foreground transition-colors group-hover:text-foreground">
                     <Button variant="ghost" size="icon-xs" aria-label={`Select ${row.label}`} title={`Select ${row.label}`} disabled={!row.found} onClick={() => props.onSelect(row.id)}>
                       <Crosshair />
                     </Button>
@@ -148,10 +157,10 @@ export function RearrangePanel(props: RearrangePanelProps) {
           )}
         </div>
 
-        <div className="flex flex-col gap-1.5 border-t border-border/60 pt-2.5">
+        <div className="flex flex-col gap-1.5 border-t border-border/50 pt-3">
           <SectionLabel>Shortcuts</SectionLabel>
           <dl
-            className="grid grid-cols-[auto_1fr] items-center gap-x-2.5 gap-y-1 rounded-lg bg-muted/30 p-2 text-[11px] text-muted-foreground ring-1 ring-foreground/[0.05] dark:ring-white/[0.06]"
+            className="grid grid-cols-[auto_1fr] items-center gap-x-2.5 gap-y-1.5 rounded-xl border border-border/40 bg-muted/25 p-2.5 text-[11px] text-muted-foreground"
             data-annotate-rearrange-keys
           >
             <dt>

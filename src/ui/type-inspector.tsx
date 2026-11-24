@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useEffectEvent, useState } from "react";
+import { Button } from "./primitives.tsx";
+import { cn } from "cn";
+import { Minus, Plus, RotateCcw } from "lucide-react";
 import { guideOffsets, normalizeScale, type ScaleStep } from "../core/drag-guides.ts";
 import { normalLineHeightPx, readTypeStyle, textCandidates, textTarget } from "../core/inspect-dom.ts";
 import { tokensForProperty, type PickerToken } from "../core/token-catalog.ts";
@@ -8,6 +11,7 @@ import { formatPx, isGridValue, lineHeightPx, type TokenStatus } from "../core/t
 import type { StyleValue } from "../core/style-change.ts";
 import {
   groupByKey,
+  primaryFamily,
   rawTypeValue,
   sameTokenKey,
   signatureLabel,
@@ -20,12 +24,17 @@ import {
 } from "../core/type-signature.ts";
 import { GroupOverlay, TypeLadder, type TypeLadderColumn } from "./group-overlay.tsx";
 import { EDIT_NOT_FOUND, type InspectorContext } from "./inspector-context.ts";
-import { PanelFrame } from "./inspector-panel.tsx";
-import { StyleRow } from "./style-row.tsx";
+import { FlagBadges, PanelFrame } from "./inspector-panel.tsx";
 import { useElementPicker } from "./use-element-picker.ts";
 
 type Editable = Exclude<TypeProperty, "font-family">;
 const EDITABLE: Editable[] = ["font-size", "line-height", "font-weight", "letter-spacing"];
+const PROPERTY_LABEL: Record<Editable, string> = {
+  "font-size": "Size",
+  "line-height": "Line height",
+  "font-weight": "Weight",
+  "letter-spacing": "Tracking",
+};
 const UNITS: Record<Editable, string[]> = { "font-size": ["px", "rem", "em"], "line-height": ["px", ""], "font-weight": [], "letter-spacing": ["px", "em"] };
 const STEP_TITLE: Record<Editable, string> = { "font-size": "±2 (Shift: ±1)", "line-height": "±4 (Shift: ±1)", "font-weight": "±100 (Shift: ±10)", "letter-spacing": "±0.5 (Shift: ±0.1)" };
 
@@ -47,6 +56,179 @@ const rootFontPx = () => Number.parseFloat(getComputedStyle(document.documentEle
 function splitNumber(value: string): { n: string; unit: string } {
   const m = /^(-?\d*\.?\d+)(px|rem|em)?$/.exec(value.trim());
   return m ? { n: m[1], unit: m[2] ?? "" } : { n: String(Number.parseFloat(value) || 0), unit: "px" };
+}
+
+type TypeControlRowProps = {
+  property: Editable;
+  current: StyleValue;
+  currentNote?: string;
+  next?: StyleValue;
+  computed: string;
+  flags: readonly string[];
+  tokens: readonly { id: string; label: string; short: string }[];
+  selectedToken?: string;
+  onToken: (id: string) => void;
+  rawValue: string;
+  units: readonly string[];
+  unit: string;
+  onRaw: (value: string, unit: string) => boolean;
+  onStep: (direction: 1 | -1, fine: boolean) => void;
+  stepTitle: string;
+  onReset: () => void;
+};
+
+function TypeControlRow(props: TypeControlRowProps) {
+  const [draft, setDraft] = useState<{ token: string | undefined; value: string; unit: string; invalid: boolean } | null>(null);
+  const activeDraft = draft && draft.token === props.selectedToken ? draft : null;
+  const value = activeDraft?.value ?? props.rawValue;
+  const unit = activeDraft?.unit ?? props.unit;
+  const visibleFlags = props.tokens.length > 0 ? props.flags : props.flags.filter((f) => f !== "no token");
+
+  const commit = (v: string, u: string) => {
+    const ok = props.onRaw(v, u);
+    setDraft({ token: ok ? undefined : props.selectedToken, value: v, unit: u, invalid: !ok });
+  };
+
+  return (
+    <div
+      data-annotate-panel-row={props.property}
+      className={cn(
+        "flex flex-col gap-2 rounded-xl border p-2.5 transition-colors",
+        props.next ? "border-primary/25 bg-muted/50" : "border-border/50 bg-muted/30",
+      )}
+    >
+      <div className="flex min-h-5 items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <span className="text-xs font-medium text-foreground">{PROPERTY_LABEL[props.property]}</span>
+          <FlagBadges flags={visibleFlags} />
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {props.next ? (
+            <>
+              <span data-annotate-current className="font-mono text-[10px] text-muted-foreground tabular-nums">
+                {props.current.value}
+              </span>
+              <span aria-hidden className="text-[10px] text-muted-foreground/50">
+                →
+              </span>
+              <span data-annotate-new className="font-mono text-[11px] font-medium text-foreground tabular-nums">
+                {props.next.token ? props.next.value : props.computed}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                data-annotate-reset
+                aria-label={`Reset ${PROPERTY_LABEL[props.property]}`}
+                title={`Reset ${PROPERTY_LABEL[props.property]}`}
+                className="size-5 text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  setDraft(null);
+                  props.onReset();
+                }}
+              >
+                <RotateCcw className="size-3" />
+              </Button>
+            </>
+          ) : (
+            <span data-annotate-current className="font-mono text-[11px] text-muted-foreground tabular-nums">
+              {props.current.value}
+              {props.currentNote ? ` ${props.currentNote}` : ""}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1.5">
+        <div className="flex h-7 min-w-0 flex-1 items-center rounded-lg border border-border/70 bg-background/90 shadow-2xs transition-colors focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20 dark:bg-background/50">
+          <input
+            aria-label={`${props.property} value`}
+            aria-invalid={activeDraft?.invalid || undefined}
+            data-annotate-raw-input
+            className={cn(
+              "h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-xs text-foreground tabular-nums outline-none",
+              activeDraft?.invalid && "text-destructive",
+            )}
+            value={value}
+            onChange={(event) => commit(event.target.value, unit)}
+            onBlur={() => {
+              if (activeDraft && !activeDraft.invalid) setDraft(null);
+            }}
+          />
+          {props.units.length > 0 && (
+            <select
+              aria-label={`${props.property} unit`}
+              data-annotate-unit
+              className="h-full shrink-0 cursor-pointer border-l border-border/60 bg-transparent px-1.5 font-mono text-[11px] text-muted-foreground outline-none hover:text-foreground"
+              value={unit}
+              onChange={(event) => commit(value, event.target.value)}
+            >
+              {props.units.map((u) => (
+                <option key={u} value={u}>
+                  {u || "×"}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Button
+            variant="outline"
+            size="icon-xs"
+            aria-label={`Decrease ${props.property}`}
+            title={props.stepTitle}
+            data-annotate-step="-1"
+            onClick={(event) => {
+              setDraft(null);
+              props.onStep(-1, event.shiftKey);
+            }}
+          >
+            <Minus />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon-xs"
+            aria-label={`Increase ${props.property}`}
+            title={props.stepTitle}
+            data-annotate-step="1"
+            onClick={(event) => {
+              setDraft(null);
+              props.onStep(1, event.shiftKey);
+            }}
+          >
+            <Plus />
+          </Button>
+        </div>
+      </div>
+
+      {props.tokens.length > 0 && (
+        <div className="annotate-scroll flex max-h-20 flex-wrap gap-1 overflow-y-auto pt-0.5">
+          {props.tokens.map((t) => {
+            const active = props.selectedToken === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                aria-pressed={active}
+                title={t.label}
+                onClick={() => {
+                  setDraft(null);
+                  props.onToken(t.id);
+                }}
+                className={cn(
+                  "inline-flex h-6 cursor-pointer items-center gap-1 rounded-md border px-1.5 font-mono text-[10px] leading-none tabular-nums transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                  active
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border/60 bg-background/75 text-muted-foreground hover:bg-muted hover:text-foreground dark:bg-background/35",
+                )}
+              >
+                <span className="max-w-28 truncate">{t.short}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -270,7 +452,12 @@ export function TypeInspector({ ctx }: { ctx: InspectorContext }) {
 
   const badge = sel ? `${sel.members.length} element${sel.members.length === 1 ? "" : "s"}${sel.sameToken && sel.unknown ? ` · ${sel.unknown} unknown` : ""}` : undefined;
   const familyToken = sel ? tokenOf(sel.anchor, "font-family") : undefined;
-  const familyLabel = sel ? `${sel.style["font-family"]}${familyToken ? ` · ${familyToken}` : ""}` : "";
+  const familyPrimary = sel ? primaryFamily(sel.style["font-family"]) : "";
+  const liveComputed = sel ? getComputedStyle(sel.anchor) : null;
+  const liveSize = liveComputed ? liveComputed.fontSize : sel?.style["font-size"] ?? "";
+  const liveLineHeight = liveComputed ? liveComputed.lineHeight : sel?.style["line-height"] ?? "";
+  const liveWeight = liveComputed ? liveComputed.fontWeight : sel?.style["font-weight"] ?? "";
+  const showScope = Boolean(sel && (sel.members.length > 1 || sel.sameToken));
   void picker.tick;
 
   return (
@@ -283,21 +470,52 @@ export function TypeInspector({ ctx }: { ctx: InspectorContext }) {
           kind="type"
           elementName={sel?.name ?? "Type"}
           regionLabel={sel ? signatureLabel(sel.style) : "Click text to select its type group"}
-          count={sel?.members.length}
+          count={sel && sel.members.length > 1 ? sel.members.length : undefined}
           pending={ctx.pending}
           onRemove={(id) => styles.remove(id)}
           onEdit={ctx.onEdit}
           onCopy={ctx.onCopy}
         >
           {sel && (
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-col gap-1.5 rounded-lg bg-muted/40 p-2 ring-1 ring-foreground/[0.06] dark:ring-white/[0.07]">
-                <label className="flex cursor-pointer items-center justify-between gap-2 text-xs select-none">
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center gap-3 rounded-xl border border-border/50 bg-muted/35 p-3" data-annotate-type-family>
+                <div
+                  aria-hidden
+                  className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background/80 text-lg leading-none text-foreground dark:bg-background/45"
+                  style={{
+                    fontFamily: sel.style["font-family"],
+                    fontWeight: Number(liveWeight) || 500,
+                  }}
+                >
+                  Aa
+                </div>
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-xs font-semibold text-foreground" title={sel.style["font-family"]}>
+                      {familyPrimary}
+                    </span>
+                    {familyToken && (
+                      <span
+                        className="max-w-28 truncate rounded-md bg-background/80 px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground ring-1 ring-foreground/[0.06] dark:bg-background/45 dark:ring-white/[0.08]"
+                        title={familyToken}
+                      >
+                        {familyToken}
+                      </span>
+                    )}
+                  </div>
+                  <span className="truncate font-mono text-[11px] text-muted-foreground tabular-nums">
+                    {`${liveSize} / ${liveLineHeight} · ${liveWeight}`}
+                  </span>
+                </div>
+              </div>
+
+              {showScope && (
+                <label className="flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-border/50 bg-muted/30 px-3 py-2 text-xs select-none">
                   <span className="flex min-w-0 items-center gap-1.5 font-medium text-foreground">
                     <span>Same token only</span>
                     {sel.sameToken && sel.unknown > 0 && (
                       <span
-                        className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] leading-none text-muted-foreground tabular-nums"
+                        className="rounded-md bg-background/80 px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground tabular-nums ring-1 ring-foreground/[0.06] dark:bg-background/45"
                         data-annotate-unknown-count={sel.unknown}
                       >
                         {sel.unknown} unknown
@@ -316,62 +534,60 @@ export function TypeInspector({ ctx }: { ctx: InspectorContext }) {
                     }}
                   />
                 </label>
-                <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-1.5 text-[11px]" data-annotate-type-family>
-                  <span className="shrink-0 text-muted-foreground">font-family</span>
-                  <span
-                    className="min-w-0 truncate rounded-md bg-background/80 px-1.5 py-0.5 font-mono text-[11px] text-foreground ring-1 ring-foreground/[0.06] dark:bg-background/45 dark:ring-white/[0.07]"
-                    title={familyLabel}
-                  >
-                    {familyLabel}
-                  </span>
-                </div>
+              )}
+
+              <div className="flex flex-col gap-2">
+                {EDITABLE.map((p) => {
+                  const pending = pendingFor(p)?.styleChange;
+                  const res = resolver.resolve(sel.anchor, p);
+                  const computed = getComputedStyle(sel.anchor).getPropertyValue(p).trim();
+                  const tokens = tokenList(p);
+                  const shownValue = pending && !pending.to.token ? pending.to.value : computed;
+                  const parts =
+                    shownValue === "normal"
+                      ? { n: String(normalLineHeightPx(sel.anchor)), unit: "px" }
+                      : splitNumber(shownValue);
+                  const status: TokenStatus = res.status;
+                  const currentToken = status === "token" ? (res.token ? res.token : undefined) : undefined;
+                  return (
+                    <TypeControlRow
+                      key={`${sel.groupId}-${p}`}
+                      property={p}
+                      current={pending?.from ?? { value: sel.style[p], ...(currentToken ? { token: currentToken } : {}) }}
+                      currentNote={p === "line-height" && sel.style[p] === "normal" ? `(${normalLineHeightPx(sel.anchor)}px)` : undefined}
+                      next={pending?.to}
+                      computed={computed}
+                      flags={pending ? [...(pendingFor(p)?.styleDetail?.flags ?? [])] : res.flags}
+                      tokens={tokens.map((t) => ({
+                        id: t.token,
+                        label: `${t.token} · ${p === "font-weight" ? t.number : `${t.px}px`}`,
+                        short: `${t.token.replace(/^--(text|leading|font-weight|tracking)-/, "")} · ${p === "font-weight" ? t.number : `${t.px}px`}`,
+                      }))}
+                      selectedToken={pending?.to.token}
+                      onToken={(id) => {
+                        const t = tokens.find((x) => x.token === id);
+                        if (t) set(p, { value: tokenValue(p, t), token: t.token });
+                      }}
+                      rawValue={parts.n}
+                      units={UNITS[p]}
+                      unit={p === "font-weight" ? "" : parts.unit || "px"}
+                      onRaw={(v, u) => {
+                        const value = rawTypeValue(p, v, u as "px" | "em" | "rem" | "");
+                        if (value) set(p, { value });
+                        return Boolean(value);
+                      }}
+                      onStep={(direction, fine) => {
+                        if (snapStep(p, direction, fine)) return;
+                        const base = p === "line-height" && computed === "normal" ? normalLineHeightPx(sel.anchor) : Number.parseFloat(computed) || 0;
+                        const next = stepTypeValue(p, base, direction, fine);
+                        set(p, { value: p === "font-weight" ? String(next) : `${next}px` });
+                      }}
+                      stepTitle={STEP_TITLE[p]}
+                      onReset={() => reset(p)}
+                    />
+                  );
+                })}
               </div>
-              {EDITABLE.map((p) => {
-                const pending = pendingFor(p)?.styleChange;
-                const res = resolver.resolve(sel.anchor, p);
-                const computed = getComputedStyle(sel.anchor).getPropertyValue(p).trim();
-                const tokens = tokenList(p);
-                const shownValue = pending && !pending.to.token ? pending.to.value : computed;
-                const parts =
-                  shownValue === "normal"
-                    ? { n: String(normalLineHeightPx(sel.anchor)), unit: "px" }
-                    : splitNumber(shownValue);
-                const status: TokenStatus = res.status;
-                const currentToken = status === "token" ? (res.token ? res.token : undefined) : undefined;
-                return (
-                  <StyleRow
-                    key={`${sel.groupId}-${p}`}
-                    property={p}
-                    current={pending?.from ?? { value: sel.style[p], ...(currentToken ? { token: currentToken } : {}) }}
-                    currentNote={p === "line-height" && sel.style[p] === "normal" ? `(${normalLineHeightPx(sel.anchor)}px)` : undefined}
-                    next={pending?.to}
-                    computed={computed}
-                    flags={pending ? [...(pendingFor(p)?.styleDetail?.flags ?? [])] : res.flags}
-                    tokens={tokens.map((t) => ({ id: t.token, label: `${t.token} · ${p === "font-weight" ? t.number : `${t.px}px`}` }))}
-                    selectedToken={pending?.to.token}
-                    onToken={(id) => {
-                      const t = tokens.find((x) => x.token === id);
-                      if (t) set(p, { value: tokenValue(p, t), token: t.token });
-                    }}
-                    rawValue={parts.n}
-                    units={UNITS[p]}
-                    unit={p === "font-weight" ? "" : parts.unit || (p === "line-height" ? "px" : "px")}
-                    onRaw={(v, u) => {
-                      const value = rawTypeValue(p, v, u as "px" | "em" | "rem" | "");
-                      if (value) set(p, { value });
-                      return Boolean(value);
-                    }}
-                    onStep={(direction, fine) => {
-                      if (snapStep(p, direction, fine)) return;
-                      const base = p === "line-height" && computed === "normal" ? normalLineHeightPx(sel.anchor) : Number.parseFloat(computed) || 0;
-                      const next = stepTypeValue(p, base, direction, fine);
-                      set(p, { value: p === "font-weight" ? String(next) : `${next}px` });
-                    }}
-                    stepTitle={STEP_TITLE[p]}
-                    onReset={() => reset(p)}
-                  />
-                );
-              })}
             </div>
           )}
         </PanelFrame>

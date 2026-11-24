@@ -49,10 +49,10 @@ export const LayoutPalette = forwardRef<HTMLDivElement, LayoutPaletteProps>(func
         "data-annotate-layout-palette": "",
       }}
     >
-      <div className="flex flex-col gap-2.5">
-        <div className="sticky top-0 z-10 -mx-3 -mt-2.5 flex flex-col gap-1.5 border-b border-border/60 bg-popover/95 px-3 pt-2.5 pb-2 backdrop-blur-md">
+      <div className="flex flex-col gap-3">
+        <div className="sticky top-0 z-10 -mx-3 -mt-2.5 flex flex-col gap-2 border-b border-border/50 bg-popover/95 px-3 pt-2.5 pb-2.5 backdrop-blur-md">
           <div className="relative">
-            <Search aria-hidden className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Search aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground/80" />
             <input
               type="text"
               value={query}
@@ -60,14 +60,14 @@ export const LayoutPalette = forwardRef<HTMLDivElement, LayoutPaletteProps>(func
               placeholder="Search components…"
               aria-label="Search layout components"
               data-annotate-palette-search=""
-              className={cn(FIELD_CLASS, "w-full pr-6 pl-7")}
+              className={cn(FIELD_CLASS, "h-8 w-full rounded-lg border-border/60 bg-muted/35 pr-7 pl-8 focus-visible:bg-background")}
             />
             {query && (
               <button
                 type="button"
                 aria-label="Clear search"
                 onClick={() => setQuery("")}
-                className="absolute top-1/2 right-1.5 flex size-4 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                className="absolute top-1/2 right-2 flex size-4 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <X className="size-3" />
               </button>
@@ -83,10 +83,10 @@ export const LayoutPalette = forwardRef<HTMLDivElement, LayoutPaletteProps>(func
                   aria-pressed={active}
                   onClick={() => setCategory(cat)}
                   className={cn(
-                    "h-6 shrink-0 cursor-pointer rounded-md px-2 text-[11px] font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                    "h-6 shrink-0 cursor-pointer rounded-full px-2.5 text-[11px] font-medium whitespace-nowrap transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
                     active
                       ? "bg-primary text-primary-foreground shadow-2xs"
-                      : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground",
+                      : "bg-muted/45 text-muted-foreground hover:bg-muted/80 hover:text-foreground",
                   )}
                 >
                   {cat}
@@ -97,36 +97,52 @@ export const LayoutPalette = forwardRef<HTMLDivElement, LayoutPaletteProps>(func
         </div>
 
         {visibleGroups.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border/70 px-3 py-5 text-center text-xs text-muted-foreground">
-            No components match “{query}”.
+          <div className="flex flex-col items-center gap-1.5 rounded-xl border border-border/40 bg-muted/25 px-3 py-4 text-center text-xs text-muted-foreground">
+            <span>No components match “{query}”.</span>
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                className="cursor-pointer text-[11px] font-medium text-foreground underline underline-offset-4 hover:opacity-80"
+              >
+                Clear search
+              </button>
+            )}
           </div>
         ) : (
           visibleGroups.map(({ group, items }) => (
-            <section key={group} aria-label={group} className="flex flex-col gap-1.5">
-              <SectionLabel meta={<span className="font-mono tabular-nums">{items.length}</span>}>{group}</SectionLabel>
+            <section key={group} aria-label={group} className="flex flex-col gap-2">
+              <SectionLabel meta={<span className="font-mono text-[10px] text-muted-foreground tabular-nums">{items.length}</span>}>
+                {group}
+              </SectionLabel>
               <div className="grid grid-cols-2 gap-1.5">
-                {items.map((item) => (
-                  <button
-                    key={item.type}
-                    type="button"
-                    data-annotate-palette-item={item.type}
-                    aria-pressed={props.armed === item.type}
-                    title={`${item.label} (${item.width}×${item.height})`}
-                    onPointerDown={(event) => props.onPointerDownItem(item, event)}
-                    className={cn(
-                      "group flex cursor-grab touch-none flex-col items-stretch gap-1.5 rounded-lg bg-background/70 p-2 text-left ring-1 ring-foreground/[0.08] transition-all outline-none select-none hover:bg-muted/70 hover:ring-foreground/15 focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing dark:bg-background/40 dark:ring-white/[0.08]",
-                      props.armed === item.type && "bg-muted ring-2 ring-primary",
-                    )}
-                  >
-                    <span className="relative flex h-9 items-center justify-center rounded-md bg-muted/40 p-1">
-                      <Wireframe type={item.type} width={item.width} height={item.height} />
-                      <span className="pointer-events-none absolute right-1 bottom-0.5 rounded bg-background/80 px-1 font-mono text-[9px] leading-tight text-muted-foreground opacity-0 tabular-nums backdrop-blur-xs transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                        {`${item.width}×${item.height}`}
+                {items.map((item) => {
+                  const armed = props.armed === item.type;
+                  return (
+                    <button
+                      key={item.type}
+                      type="button"
+                      data-annotate-palette-item={item.type}
+                      aria-pressed={armed}
+                      title={`${item.label} (${item.width}×${item.height})`}
+                      onPointerDown={(event) => props.onPointerDownItem(item, event)}
+                      className={cn(
+                        "group flex cursor-grab touch-none flex-col items-stretch gap-1.5 rounded-xl border p-2 text-left transition-all outline-none select-none focus-visible:ring-2 focus-visible:ring-ring active:translate-y-0 active:cursor-grabbing",
+                        armed
+                          ? "border-primary/45 bg-primary/[0.06] ring-2 ring-primary/50"
+                          : "border-border/50 bg-muted/30 hover:-translate-y-px hover:border-border/80 hover:bg-muted/55",
+                      )}
+                    >
+                      <span className="relative flex h-10 items-center justify-center rounded-lg border border-border/40 bg-background/75 p-1.5 dark:bg-background/40">
+                        <Wireframe type={item.type} width={item.width} height={item.height} />
+                        <span className="pointer-events-none absolute right-1 bottom-0.5 rounded bg-background/85 px-1 font-mono text-[9px] leading-tight text-muted-foreground opacity-0 tabular-nums backdrop-blur-xs transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                          {`${item.width}×${item.height}`}
+                        </span>
                       </span>
-                    </span>
-                    <span className="truncate text-[11px] font-medium text-foreground">{item.label}</span>
-                  </button>
-                ))}
+                      <span className="truncate px-0.5 text-[11px] font-medium text-foreground">{item.label}</span>
+                    </button>
+                  );
+                })}
               </div>
             </section>
           ))
