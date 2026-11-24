@@ -39,59 +39,72 @@ export function StyleRow(props: StyleRowProps) {
   const activeDraft = draft && draft.token === props.selectedToken ? draft : null;
   const value = activeDraft?.value ?? props.rawValue;
   const unit = activeDraft?.unit ?? props.unit;
+  const isInvalid = Boolean(activeDraft?.invalid);
+
   const commit = (v: string, u: string) => {
     const ok = props.onRaw(v, u);
     setDraft({ token: ok ? undefined : props.selectedToken, value: v, unit: u, invalid: !ok });
   };
+
   const swatch = (hex?: string) =>
-    hex && <span aria-hidden className="inline-block size-3 shrink-0 rounded-[3px] ring-1 ring-foreground/20 dark:ring-white/20" style={{ background: hex }} />;
+    hex && (
+      <span
+        aria-hidden
+        className="inline-block size-3 shrink-0 rounded-[4px] ring-1 ring-foreground/20 dark:ring-white/20"
+        style={{ background: hex }}
+      />
+    );
 
   return (
     <div
       data-annotate-panel-row={props.property}
       className={cn(
-        "flex flex-col gap-1.5 rounded-lg p-2 ring-1 transition-colors",
+        "flex flex-col gap-1.5 rounded-xl p-2.5 ring-1 transition-colors",
         props.next
-          ? "bg-muted/60 ring-primary/25 dark:ring-primary/30"
-          : "bg-muted/40 ring-foreground/[0.06] dark:ring-white/[0.07]",
+          ? "bg-muted/55 ring-ring/30 dark:bg-white/[0.05] dark:ring-ring/35"
+          : "bg-muted/35 ring-foreground/[0.05] dark:bg-white/[0.03] dark:ring-white/[0.06]",
       )}
     >
       <div className="flex min-h-5 items-center justify-between gap-1.5">
         <div className="flex min-w-0 flex-wrap items-center gap-1">
-          <span className="font-mono text-[11px] font-semibold tracking-tight text-foreground">{props.property}</span>
+          <span className="font-mono text-[11px] font-medium tracking-tight text-foreground/90">{props.property}</span>
           <FlagBadges flags={props.flags} />
         </div>
         <Button
           variant="ghost"
-          size="xs"
+          size="icon-xs"
           disabled={!props.next}
+          aria-label={`Reset ${props.property}`}
+          title={`Reset ${props.property}`}
           data-annotate-reset
-          className="h-5 shrink-0 px-1.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-35"
+          className="size-5 shrink-0 text-muted-foreground transition-opacity hover:text-foreground disabled:opacity-25"
           onClick={() => {
             setDraft(null);
             props.onReset();
           }}
         >
           <RotateCcw className="size-3" />
-          Reset
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-md bg-background/75 px-2 py-1 text-[11px] ring-1 ring-foreground/[0.05] dark:bg-background/45 dark:ring-white/[0.06]">
-        <span data-annotate-current className="inline-flex min-w-0 items-center gap-1 font-mono text-muted-foreground tabular-nums break-all">
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-lg bg-background/60 px-2 py-1 text-[11px] ring-1 ring-foreground/[0.04] dark:bg-black/20 dark:ring-white/[0.05]">
+        <span
+          data-annotate-current
+          className="inline-flex min-w-0 items-center gap-1 font-mono text-muted-foreground tabular-nums break-all"
+        >
           {swatch(props.swatch?.current)}
           {props.current.value}
           {props.current.token ? ` · ${props.current.token}` : ""}
           {props.currentNote ? ` ${props.currentNote}` : ""}
         </span>
-        <span aria-hidden className="text-muted-foreground/50">
+        <span aria-hidden className="text-muted-foreground/45">
           →
         </span>
         <span
           data-annotate-new
           className={cn(
             "inline-flex min-w-0 items-center gap-1 font-mono tabular-nums break-all",
-            props.next ? "font-medium text-foreground" : "text-muted-foreground/60",
+            props.next ? "font-medium text-foreground" : "text-muted-foreground/50",
           )}
         >
           {props.next ? (
@@ -103,22 +116,25 @@ export function StyleRow(props: StyleRowProps) {
             "—"
           )}
         </span>
-        <span className="ml-auto font-mono text-[10px] text-muted-foreground/80 tabular-nums" data-annotate-readout>
-          Computed {props.computed}
+        <span
+          className="ml-auto font-mono text-[10px] text-muted-foreground/75 tabular-nums"
+          data-annotate-readout
+        >
+          {props.computed}
         </span>
       </div>
 
       <select
         aria-label={`${props.property} token`}
         data-annotate-token-select
-        className={cn(FIELD_CLASS, "w-full font-mono")}
+        className={cn(FIELD_CLASS, "w-full cursor-pointer font-mono")}
         value={props.selectedToken ?? ""}
         onChange={(event) => {
           setDraft(null);
           if (event.target.value) props.onToken(event.target.value);
         }}
       >
-        <option value="">{props.tokens.length ? "Choose a token" : "No tokens found"}</option>
+        <option value="">{props.tokens.length ? "Choose a token…" : "No tokens found"}</option>
         {props.tokens.map((t) => (
           <option key={t.id} value={t.id}>
             {t.label}
@@ -127,32 +143,40 @@ export function StyleRow(props: StyleRowProps) {
       </select>
 
       <div className="flex items-center gap-1">
-        <input
-          aria-label={`${props.property} value`}
-          aria-invalid={activeDraft?.invalid || undefined}
-          data-annotate-raw-input
-          className={cn(FIELD_CLASS, "min-w-0 flex-1 font-mono tabular-nums", activeDraft?.invalid && "border-destructive")}
-          value={value}
-          onChange={(event) => commit(event.target.value, unit)}
-          onBlur={() => {
-            if (activeDraft && !activeDraft.invalid) setDraft(null);
-          }}
-        />
-        {props.units.length > 0 && (
-          <select
-            aria-label={`${props.property} unit`}
-            data-annotate-unit
-            className={cn(FIELD_CLASS, "w-14 shrink-0 px-1.5 font-mono")}
-            value={unit}
-            onChange={(event) => commit(value, event.target.value)}
-          >
-            {props.units.map((u) => (
-              <option key={u} value={u}>
-                {u || "×"}
-              </option>
-            ))}
-          </select>
-        )}
+        <div
+          className={cn(
+            "flex h-7 min-w-0 flex-1 items-center rounded-lg border border-transparent bg-muted/40 transition-colors hover:border-border/60 hover:bg-muted/60 focus-within:border-ring/70 focus-within:bg-background focus-within:ring-2 focus-within:ring-ring/30 dark:bg-white/[0.05] dark:hover:border-white/[0.1] dark:hover:bg-white/[0.08] dark:focus-within:bg-background/90",
+            isInvalid &&
+              "border-destructive bg-destructive/5 hover:border-destructive focus-within:border-destructive focus-within:ring-destructive/25",
+          )}
+        >
+          <input
+            aria-label={`${props.property} value`}
+            aria-invalid={isInvalid || undefined}
+            data-annotate-raw-input
+            className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-xs text-foreground tabular-nums outline-none placeholder:text-muted-foreground/70"
+            value={value}
+            onChange={(event) => commit(event.target.value, unit)}
+            onBlur={() => {
+              if (activeDraft && !activeDraft.invalid) setDraft(null);
+            }}
+          />
+          {props.units.length > 0 && (
+            <select
+              aria-label={`${props.property} unit`}
+              data-annotate-unit
+              className="mr-1 h-5 shrink-0 cursor-pointer rounded-md bg-background/70 px-1 font-mono text-[10px] font-medium text-muted-foreground transition-colors outline-none hover:text-foreground dark:bg-white/[0.08]"
+              value={unit}
+              onChange={(event) => commit(value, event.target.value)}
+            >
+              {props.units.map((u) => (
+                <option key={u} value={u}>
+                  {u || "×"}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
         {props.onStep && (
           <div className="flex shrink-0 items-center gap-0.5">
             <Button
@@ -161,6 +185,7 @@ export function StyleRow(props: StyleRowProps) {
               aria-label={`Decrease ${props.property}`}
               title={props.stepTitle}
               data-annotate-step="-1"
+              className="h-7 w-6 rounded-lg text-muted-foreground hover:text-foreground"
               onClick={(event) => {
                 setDraft(null);
                 props.onStep?.(-1, event.shiftKey);
@@ -174,6 +199,7 @@ export function StyleRow(props: StyleRowProps) {
               aria-label={`Increase ${props.property}`}
               title={props.stepTitle}
               data-annotate-step="1"
+              className="h-7 w-6 rounded-lg text-muted-foreground hover:text-foreground"
               onClick={(event) => {
                 setDraft(null);
                 props.onStep?.(1, event.shiftKey);
