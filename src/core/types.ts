@@ -1,0 +1,101 @@
+import type { InspectorSubMode } from "./spacing-modes.ts";
+import type { StyleChange, StyleChangeDetail } from "./style-change.ts";
+import type { RearrangeDetail } from "./rearrange-output.ts";
+
+export type Rect = { x: number; y: number; width: number; height: number };
+
+export type OutputDetail = "compact" | "standard" | "detailed" | "forensic";
+
+export type MarkerClickBehavior = "edit" | "delete";
+
+export type CopyFormat = "markdown" | "source" | "classes" | { attribute: string };
+
+export type Annotation = {
+  id: string;
+  /** Percent of viewport width. */
+  x: number;
+  /** Px from document top, or from viewport top when `isFixed`. */
+  y: number;
+  comment: string;
+  element: string;
+  elementPath: string;
+  timestamp: number;
+  selectedText?: string;
+  boundingBox?: Rect;
+  nearbyText?: string;
+  cssClasses?: string;
+  nearbyElements?: string;
+  computedStyles?: string;
+  fullPath?: string;
+  accessibility?: string;
+  isMultiSelect?: boolean;
+  isFixed?: boolean;
+  reactComponents?: string;
+  sourceFile?: string;
+  attributes?: Record<string, string>;
+  frame?: {
+    path: { index: number; id?: string; url: string }[];
+    x: number;
+    y: number;
+    fixed: boolean;
+    boundingBox: Rect;
+  };
+  drawingIndex?: number;
+  elementBoundingBoxes?: Rect[];
+  kind?: "feedback" | "placement" | "rearrange" | "style-change" | "measure";
+  /** Inspector spec 7.4: set when `kind` is "style-change". */
+  styleChange?: StyleChange;
+  /** Inspector spec 7.4: set when `kind` is "measure". */
+  measure?: StyleChange["measure"];
+  /** Extension data for `styleChange` / `measure`: flags, labels, forensic origin. */
+  styleDetail?: StyleChangeDetail;
+  placement?: {
+    componentType: string;
+    width: number;
+    height: number;
+    scrollY: number;
+    text?: string;
+  };
+  rearrange?: {
+    selector: string;
+    label: string;
+    tagName: string;
+    originalRect: Rect;
+    currentRect: Rect;
+  };
+  /** Extension data for `rearrange` (parity spec 10.2): removed flag, sibling relation, forensic computed values. */
+  rearrangeDetail?: RearrangeDetail;
+  sessionId?: string;
+  url?: string;
+  intent?: "fix" | "change" | "question" | "approve";
+  severity?: "blocking" | "important" | "suggestion";
+  status?: "pending" | "acknowledged" | "resolved" | "dismissed";
+  thread?: { id: string; role: "human" | "agent"; content: string; timestamp: number }[];
+  createdAt?: string;
+  updatedAt?: string;
+  resolvedAt?: string;
+  resolvedBy?: "human" | "agent";
+  authorId?: string;
+  _syncedTo?: string;
+};
+
+export type Settings = {
+  outputDetail: OutputDetail;
+  autoClearAfterCopy: boolean;
+  annotationColorId: string;
+  blockInteractions: boolean;
+  reactEnabled: boolean;
+  markerClickBehavior: MarkerClickBehavior;
+  webhookUrl: string;
+  webhooksEnabled: boolean;
+  /** Spacing inspector sub-mode (inspector spec 14): Box (regions) or Lines (guides and measure). */
+  inspectorSubMode: InspectorSubMode;
+  /** I9 drag handles on the selected Box sides (inspector spec 13.1). */
+  inspectorHandles: boolean;
+  /** I9 token guides: spacing Box sides and the type ladder (inspector spec 13.3, I9b). */
+  inspectorGuides: boolean;
+};
+
+export type Theme = "dark" | "light";
+
+export type Point = { x: number; y: number };
