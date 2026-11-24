@@ -154,6 +154,20 @@ export function TypeInspector({ ctx }: { ctx: InspectorContext }) {
 
   useEffect(() => resolver.subscribe(picker.redraw), [resolver, picker.redraw]);
 
+  const onEscape = useEffectEvent(() => {
+    if (!selection?.anchor.isConnected) {
+      if (selection) setSelection(null);
+      return false;
+    }
+    setSelection(null);
+    return true;
+  });
+  const { setEscape } = ctx;
+  useEffect(() => {
+    setEscape(() => onEscape());
+    return () => setEscape(null);
+  }, [setEscape]);
+
   const onFocus = useEffectEvent((id: string) => {
     const a = styles.items.find((item) => item.id === id);
     if (a?.styleChange?.category !== "typography" || !a.styleDetail?.groupId) return;
@@ -318,7 +332,10 @@ export function TypeInspector({ ctx }: { ctx: InspectorContext }) {
                 const computed = getComputedStyle(sel.anchor).getPropertyValue(p).trim();
                 const tokens = tokenList(p);
                 const shownValue = pending && !pending.to.token ? pending.to.value : computed;
-                const parts = splitNumber(shownValue === "normal" ? "0" : shownValue);
+                const parts =
+                  shownValue === "normal"
+                    ? { n: String(normalLineHeightPx(sel.anchor)), unit: "px" }
+                    : splitNumber(shownValue);
                 const status: TokenStatus = res.status;
                 const currentToken = status === "token" ? (res.token ? res.token : undefined) : undefined;
                 return (

@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Badge, Button } from "./primitives.tsx";
 import { cn } from "cn";
-import { Copy, Pencil, Pipette, Ruler, Type, X } from "lucide-react";
+import { Check, Copy, Pencil, Pipette, Ruler, Type, X } from "lucide-react";
 import { FIELD_CLASS, FloatingPanel, SectionLabel } from "./chrome.tsx";
 
 /** One row of the shared pending list (all inspector categories, spec 6 mock-up). */
@@ -68,6 +68,23 @@ export function FlagBadges({ flags }: { flags: readonly string[] }) {
  */
 export function PanelFrame(props: PanelFrameProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    },
+    [],
+  );
+  const handleCopy = () => {
+    props.onCopy?.();
+    setCopied(true);
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => {
+      setCopied(false);
+      copyTimer.current = null;
+    }, 1500);
+  };
   const meta = PANEL_META[props.kind];
   const dataAttrs: Record<string, string | boolean | undefined> = {
     "data-annotate-panel": props.kind,
@@ -76,9 +93,13 @@ export function PanelFrame(props: PanelFrameProps) {
 
   const footer = (
     <div className="flex flex-col gap-2">
-      <SectionLabel>Pending changes ({props.pending.length})</SectionLabel>
+      <SectionLabel meta={<span className="font-mono text-[10px] text-muted-foreground tabular-nums">{props.pending.length}</span>}>
+        Pending changes
+      </SectionLabel>
       {props.pending.length === 0 ? (
-        <span className="text-[11px] text-muted-foreground">No changes yet.</span>
+        <div className="rounded-lg border border-dashed border-border/70 px-3 py-3 text-center text-xs text-muted-foreground">
+          No changes yet.
+        </div>
       ) : (
         <ol className="annotate-scroll flex max-h-36 flex-col gap-1 overflow-y-auto" data-annotate-pending>
           {props.pending.map((item, index) => (
@@ -121,9 +142,9 @@ export function PanelFrame(props: PanelFrameProps) {
         </ol>
       )}
       {props.onCopy && (
-        <Button variant="outline" size="sm" className="w-full" data-annotate-panel-copy disabled={props.pending.length === 0} onClick={props.onCopy}>
-          <Copy />
-          Copy
+        <Button variant="outline" size="sm" className="w-full" data-annotate-panel-copy disabled={props.pending.length === 0} onClick={handleCopy}>
+          {copied ? <Check /> : <Copy />}
+          {copied ? "Copied" : "Copy"}
         </Button>
       )}
     </div>

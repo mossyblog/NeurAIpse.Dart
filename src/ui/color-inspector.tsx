@@ -108,6 +108,20 @@ export function ColorInspector({ ctx }: { ctx: InspectorContext }) {
   });
   useEffect(() => resolver.subscribe(picker.redraw), [resolver, picker.redraw]);
 
+  const onEscape = useEffectEvent(() => {
+    if (!selection?.anchor.isConnected) {
+      if (selection) setSelection(null);
+      return false;
+    }
+    setSelection(null);
+    return true;
+  });
+  const { setEscape } = ctx;
+  useEffect(() => {
+    setEscape(() => onEscape());
+    return () => setEscape(null);
+  }, [setEscape]);
+
   const onFocus = useEffectEvent((id: string) => {
     const a = styles.items.find((item) => item.id === id);
     if (a?.styleChange?.category !== "color" || !a.styleDetail?.groupId) return;
@@ -196,21 +210,9 @@ export function ColorInspector({ ctx }: { ctx: InspectorContext }) {
         >
           {sel && (
             <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between gap-2 rounded-lg bg-muted/40 p-1.5 ring-1 ring-foreground/[0.06] dark:ring-white/[0.07]">
-                <select
-                  aria-label="Colour property"
-                  data-annotate-color-property
-                  className={cn(FIELD_CLASS, "min-w-0 flex-1 font-mono")}
-                  value={property}
-                  onChange={(event) => setSelection(select(sel.anchor, event.target.value, undefined, sel.base))}
-                >
-                  {colorProperties(sel.anchor).map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-                <label className="flex shrink-0 cursor-pointer items-center gap-1.5 px-1 text-xs font-medium select-none">
+              <div className="flex flex-col gap-1.5 rounded-lg bg-muted/40 p-2 ring-1 ring-foreground/[0.06] dark:ring-white/[0.07]">
+                <label className="flex cursor-pointer items-center justify-between gap-2 text-xs select-none">
+                  <span className="font-medium text-foreground">Same color</span>
                   <input
                     type="checkbox"
                     data-annotate-same-color
@@ -222,8 +224,23 @@ export function ColorInspector({ ctx }: { ctx: InspectorContext }) {
                       syncMembers(next);
                     }}
                   />
-                  <span>Same colour</span>
                 </label>
+                <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-1.5">
+                  <span className="shrink-0 text-[11px] text-muted-foreground">Property</span>
+                  <select
+                    aria-label="Colour property"
+                    data-annotate-color-property
+                    className={cn(FIELD_CLASS, "min-w-0 flex-1 font-mono")}
+                    value={property}
+                    onChange={(event) => setSelection(select(sel.anchor, event.target.value, undefined, sel.base))}
+                  >
+                    {colorProperties(sel.anchor).map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <StyleRow
                 key={`${sel.groupId}-${property}`}
@@ -280,7 +297,7 @@ export function ColorInspector({ ctx }: { ctx: InspectorContext }) {
                 )}
                 {live && rating && (
                   <div
-                    className="flex items-center justify-between gap-2 rounded-md bg-background/70 px-2 py-1.5 text-[11px] ring-1 ring-foreground/[0.05] dark:bg-background/40 dark:ring-white/[0.06]"
+                    className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 rounded-md bg-background/70 px-2 py-1.5 text-[11px] ring-1 ring-foreground/[0.05] dark:bg-background/40 dark:ring-white/[0.06]"
                     data-annotate-contrast={formatRatio(live.ratio)}
                     data-annotate-contrast-background={toHex(live.background)}
                   >

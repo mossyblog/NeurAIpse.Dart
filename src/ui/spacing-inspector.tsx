@@ -172,15 +172,16 @@ function LinesInspector({ ctx }: { ctx: InspectorContext }) {
       : [];
   const elementKey = element ? identifyElement(element, attributeNames) : null;
   const measureText = measurement && measureLabels ? `Distance between ${measureLabels[0]} and ${measureLabels[1]}: ${primaryDistance(measurement)}px` : undefined;
+  const linesSubtitle = pinA && !pinB ? "Click a second edge to measure, or hold Alt" : region ? regionProperty(region) : undefined;
 
   return (
     <>
       <SpacingOverlay subMode="lines" spacing={hover?.spacing ?? null} pins={pins} guides={guides} measurement={measurement} resolveToken={resolveToken} />
-      {twoRegions && (
+      {(twoRegions || pinA || ctx.pending.length > 0) && (
         <SpacingPanel
           key={elementKey ? `${elementKey.path}|${region ? regionProperty(region) : ""}` : "none"}
           elementName={elementKey?.name ?? "Spacing"}
-          regionLabel={region ? regionProperty(region) : undefined}
+          regionLabel={linesSubtitle}
           rows={rows}
           tokens={element ? spacingTokens(readRootVars(document), rootFontPx()) : []}
           pending={ctx.pending}
@@ -545,6 +546,12 @@ function BoxInspector({ ctx }: { ctx: InspectorContext }) {
       pressed: !mixed && liveValues.length > 0 && Math.abs(liveValues[0] - t.px) < 0.01 && (t.multiplier != null ? !namedToken : namedToken === t.name),
     }));
   const regionLabel = sel ? (sel.group === "gap" ? `${properties[0]} · ${gapRegions.length} band${gapRegions.length === 1 ? "" : "s"}` : properties.join(" + ")) : "";
+  const coveringIds = anchor
+    ? [...new Set(elements.flatMap((el) => longhands.map((l) => coveringRecord(styles, el, l)?.id)).filter((id): id is string => Boolean(id)))]
+    : [];
+  const resetSelection = () => {
+    for (const id of coveringIds) styles.remove(id);
+  };
 
   return (
     <>
@@ -577,6 +584,7 @@ function BoxInspector({ ctx }: { ctx: InspectorContext }) {
           onPreset={(preset) => selectBox({ ...presetSelection(sel.group, preset), element: anchor })}
           onValue={apply}
           onStep={step}
+          onReset={coveringIds.length > 0 ? resetSelection : undefined}
           scope={{ mode: scope, count: members.length, onChange: setScope, onPreview: setScopePreview }}
           count={elements.length > 1 ? elements.length : undefined}
           pending={ctx.pending}

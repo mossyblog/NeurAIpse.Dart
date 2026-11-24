@@ -25,13 +25,19 @@ const center = (r: Rect) => ({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
 const thickness = (r: SpacingRegion) => (r.side === "top" || r.side === "bottom" ? r.rect.height : r.rect.width);
 
 function Label({ at, text, color, attr, dim }: { at: { x: number; y: number }; text: string; color: string; attr?: Record<string, string | undefined>; dim?: boolean }) {
+  const halfW = pillWidth(text) / 2;
+  const halfH = PILL_H / 2;
+  const vw = typeof window === "undefined" ? 1280 : window.innerWidth;
+  const vh = typeof window === "undefined" ? 800 : window.innerHeight;
+  const x = Math.min(Math.max(8 + halfW, at.x), Math.max(8 + halfW, vw - 8 - halfW));
+  const y = Math.min(Math.max(8 + halfH, at.y), Math.max(8 + halfH, vh - 8 - halfH));
   return (
     <span
       {...attr}
-      className="fixed -translate-x-1/2 -translate-y-1/2 rounded px-1.5 font-mono text-[11px] leading-4 font-medium whitespace-nowrap text-white tabular-nums"
+      className="fixed -translate-x-1/2 -translate-y-1/2 rounded-[4px] px-1.5 font-mono text-[11px] leading-4 font-medium whitespace-nowrap text-white tabular-nums"
       style={{
-        left: at.x,
-        top: at.y,
+        left: x,
+        top: y,
         zIndex: Z.label,
         backgroundColor: `color-mix(in oklch, ${color} 72%, #09090b)`,
         boxShadow: `0 0 0 1px color-mix(in oklch, ${color} 55%, rgba(0, 0, 0, 0.25)), 0 1px 3px rgba(0, 0, 0, 0.28)`,

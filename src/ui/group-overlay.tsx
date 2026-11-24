@@ -16,15 +16,26 @@ const rectOf = (el: Element): Rect => {
  * a dashed outline for the hovered candidate, and an `N elements` badge on the anchor.
  * Lives in the shadow root; never hit-testable.
  */
+const BADGE_H = 18;
+const BADGE_GAP = 4;
+
 export function GroupOverlay({ hover, members, anchor, badge, kind }: { hover: Element | null; members: readonly Element[]; anchor: Element | null; badge?: string; kind: "type" | "color" | "spacing" }) {
   const anchorRect = anchor?.isConnected ? rectOf(anchor) : null;
   const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const badgeTop = anchorRect
+    ? anchorRect.y >= BADGE_H + BADGE_GAP + 8
+      ? anchorRect.y - BADGE_H - BADGE_GAP
+      : anchorRect.y + anchorRect.height + BADGE_GAP + BADGE_H <= viewportHeight - 8
+        ? anchorRect.y + anchorRect.height + BADGE_GAP
+        : Math.min(Math.max(8, anchorRect.y + BADGE_GAP), Math.max(8, viewportHeight - BADGE_H - 8))
+    : 8;
   return (
     <div data-annotate-group-overlay={kind} className="pointer-events-none fixed top-0 left-0">
       {hover && hover.isConnected && !members.includes(hover) && (
         <div
           data-annotate-hover-outline
-          className="fixed rounded-[2px]"
+          className="fixed rounded-[4px]"
           style={{
             ...box(rectOf(hover)),
             outline: `1.5px dashed ${HOVER}`,
@@ -37,7 +48,7 @@ export function GroupOverlay({ hover, members, anchor, badge, kind }: { hover: E
         <div
           key={i}
           data-annotate-member-outline
-          className="fixed rounded-[2px]"
+          className="fixed rounded-[4px]"
           style={{
             ...box(rectOf(el)),
             outline: `1.5px solid ${ACCENT}`,
@@ -50,10 +61,10 @@ export function GroupOverlay({ hover, members, anchor, badge, kind }: { hover: E
       {anchorRect && badge && (
         <span
           data-annotate-group-badge
-          className="fixed rounded px-1.5 py-0.5 font-mono text-[11px] leading-none font-medium whitespace-nowrap text-white tabular-nums"
+          className="fixed rounded-[4px] px-1.5 py-0.5 font-mono text-[11px] leading-none font-medium whitespace-nowrap text-white tabular-nums"
           style={{
             left: Math.max(8, Math.min(viewportWidth - 160, anchorRect.x)),
-            top: Math.max(8, anchorRect.y - 22),
+            top: badgeTop,
             backgroundColor: `color-mix(in oklch, ${ACCENT} 74%, #09090b)`,
             boxShadow: `0 0 0 1px color-mix(in oklch, ${ACCENT} 55%, rgba(0, 0, 0, 0.25)), 0 1px 3px rgba(0, 0, 0, 0.28)`,
             textShadow: "0 1px 1px rgba(0, 0, 0, 0.25)",
@@ -87,15 +98,20 @@ export function TypeLadder({ anchor, columns }: { anchor: Element | null; column
   if (!anchor?.isConnected) return null;
   const r = rectOf(anchor);
   const limit = window.innerHeight + LADDER_OVERFLOW;
+  const flipLeft = r.x + r.width + 180 > window.innerWidth - 340;
   const maxLabelLeft = Math.max(8, window.innerWidth - 120);
+  const maxLabelRight = Math.max(8, window.innerWidth - 120);
   return (
     <div data-annotate-type-ladder className="pointer-events-none fixed top-0 left-0">
       {columns.map((column, i) => {
-        const left = r.x + r.width + LADDER_GAP + i * (RUNG_WIDTH + LADDER_GAP);
+        const left = flipLeft
+          ? Math.max(8, r.x - LADDER_GAP - RUNG_WIDTH - i * (RUNG_WIDTH + LADDER_GAP))
+          : r.x + r.width + LADDER_GAP + i * (RUNG_WIDTH + LADDER_GAP);
         const tint = LADDER_TINT[column.property];
         const current = column.rungs.find((g) => g.current)?.px ?? 0;
         const rungs = column.rungs.filter((g) => r.y + g.px <= limit);
         const labelled = rungs.filter((g) => !g.current).sort((a, b) => Math.abs(a.px - current) - Math.abs(b.px - current) || b.px - a.px)[0];
+        const labelTop = labelled ? Math.max(8, Math.min(window.innerHeight - 24, r.y + labelled.px - 8)) : 0;
         return (
           <div key={column.property} data-annotate-type-ladder-column={column.property}>
             {rungs.map((g) => (
@@ -113,7 +129,11 @@ export function TypeLadder({ anchor, columns }: { anchor: Element | null; column
               <span
                 data-annotate-type-guide-label={column.property}
                 className={cn(PILL_CLASS, "fixed px-1.5 py-0.5 font-mono text-[10px] leading-none whitespace-nowrap tabular-nums")}
-                style={{ left: Math.min(maxLabelLeft, left + RUNG_WIDTH + 6), top: r.y + labelled.px - 8, zIndex: 5 }}
+                style={
+                  flipLeft
+                    ? { right: Math.min(maxLabelRight, Math.max(8, window.innerWidth - left + 6)), top: labelTop, zIndex: 5 }
+                    : { left: Math.min(maxLabelLeft, left + RUNG_WIDTH + 6), top: labelTop, zIndex: 5 }
+                }
               >
                 {`${labelled.token.replace(/^--/, "")} · ${Math.round(labelled.px * 100) / 100}`}
               </span>

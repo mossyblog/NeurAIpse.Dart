@@ -60,14 +60,14 @@ function Row({ row, tokens, onSet, onReset }: { row: PanelRow; tokens: SpacingTo
   const id = useId();
   const shown = row.next ?? row.current;
   const parts = splitValue(row.next && !row.next.token ? row.next.value : row.computed);
-  const [draft, setDraft] = useState<{ number: string; unit: SpacingUnit } | null>(null);
+  const [draft, setDraft] = useState<{ number: string; unit: SpacingUnit; invalid: boolean } | null>(null);
   const number = draft?.number ?? parts.number;
   const unit = draft?.unit ?? parts.unit;
   const selected = row.next?.token ? tokens.find((t) => t.name === row.next?.token) : undefined;
   const computedPx = parsePx(row.computed);
   const commitRaw = (n: string, u: SpacingUnit) => {
-    setDraft({ number: n, unit: u });
     const value = rawValue(n, u, row.property);
+    setDraft({ number: n, unit: u, invalid: !value });
     if (value) onSet(row.property, { value });
   };
   const step = (direction: 1 | -1, fine: boolean) => {
@@ -109,14 +109,14 @@ function Row({ row, tokens, onSet, onReset }: { row: PanelRow; tokens: SpacingTo
         </Button>
       </div>
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-md bg-background/75 px-2 py-1 text-[11px] ring-1 ring-foreground/[0.05] dark:bg-background/45 dark:ring-white/[0.06]">
-        <span data-annotate-current className="font-mono text-muted-foreground tabular-nums">
+        <span data-annotate-current className="min-w-0 font-mono text-muted-foreground tabular-nums break-all">
           {row.current.value}
           {row.current.token ? ` · ${row.current.token}` : ""}
         </span>
         <span aria-hidden className="text-muted-foreground/50">
           →
         </span>
-        <span data-annotate-new className={cn("font-mono tabular-nums", row.next ? "font-medium text-foreground" : "text-muted-foreground/60")}>
+        <span data-annotate-new className={cn("min-w-0 font-mono tabular-nums break-all", row.next ? "font-medium text-foreground" : "text-muted-foreground/60")}>
           {row.next ? `${shown.token ? `${shown.token} · ` : ""}${row.computed}` : "—"}
         </span>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground/80 tabular-nums" data-annotate-readout>
@@ -142,14 +142,17 @@ function Row({ row, tokens, onSet, onReset }: { row: PanelRow; tokens: SpacingTo
         ))}
       </select>
       <div className="flex items-center gap-1">
-        <Input
+        <input
           aria-label={`${row.property} value`}
+          aria-invalid={draft?.invalid || undefined}
           data-annotate-raw-input
           inputMode="decimal"
-          className={cn(FIELD_CLASS, "min-w-0 flex-1 font-mono tabular-nums")}
+          className={cn(FIELD_CLASS, "min-w-0 flex-1 font-mono tabular-nums", draft?.invalid && "border-destructive")}
           value={number}
           onChange={(event) => commitRaw(event.target.value, unit)}
-          onBlur={() => setDraft(null)}
+          onBlur={() => {
+            if (draft && !draft.invalid) setDraft(null);
+          }}
         />
         <select
           aria-label={`${row.property} unit`}
@@ -204,6 +207,8 @@ export type BoxPanelProps = {
   onPreset: (preset: "all" | "vertical" | "horizontal") => void;
   onValue: (value: StyleValue) => void;
   onStep: (direction: 1 | -1, fine: boolean) => void;
+  /** Reset pending changes covering the active selection. */
+  onReset?: () => void;
   /** Scope toggle: this element, or every element like it (spec 14.2). */
   scope?: { mode: "one" | "all"; count: number; onChange: (mode: "one" | "all") => void; onPreview: (on: boolean) => void };
   count?: number;
@@ -332,56 +337,75 @@ export function BoxPanel(props: BoxPanelProps) {
           </div>
         )}
 
-        <div className="flex h-8 items-center rounded-md border border-border bg-background p-0.5">
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Decrease"
-            title="One token down (Shift: −1px)"
-            data-annotate-box-step="-1"
-            onClick={(event) => {
-              setDraft(null);
-              props.onStep(-1, event.shiftKey);
-            }}
-          >
-            <Minus />
-          </Button>
-          <div className="relative flex h-full min-w-0 flex-1 items-center border-x border-border/60">
-            <Input
-              aria-label="Value in px for every selected side"
-              data-annotate-box-input
-              inputMode="decimal"
-              placeholder={props.readout === "mixed" ? "mixed" : undefined}
-              className="h-full w-full min-w-0 bg-transparent px-7 text-center font-mono text-xs text-foreground tabular-nums outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
-              value={number}
-              onChange={(event) => {
-                const text = event.target.value;
-                setDraft(text);
-                const n = Number(text.trim());
-                if (text.trim() !== "" && Number.isFinite(n) && n >= props.min) props.onValue({ value: `${Math.round(n * 1000) / 1000}px` });
+        <div className="flex items-center gap-1.5">
+          <div className="flex h-8 min-w-0 flex-1 items-center rounded-md border border-border bg-background p-0.5">
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Decrease"
+              title="One token down (Shift: −1px)"
+              data-annotate-box-step="-1"
+              onClick={(event) => {
+                setDraft(null);
+                props.onStep(-1, event.shiftKey);
               }}
-              onBlur={() => setDraft(null)}
-            />
-            <span aria-hidden className="pointer-events-none absolute right-2 font-mono text-[10px] text-muted-foreground">
-              px
-            </span>
+            >
+              <Minus />
+            </Button>
+            <div className="relative flex h-full min-w-0 flex-1 items-center border-x border-border/60">
+              <Input
+                aria-label="Value in px for every selected side"
+                data-annotate-box-input
+                inputMode="decimal"
+                placeholder={props.readout === "mixed" ? "mixed" : undefined}
+                className="h-full w-full min-w-0 bg-transparent px-7 text-center font-mono text-xs text-foreground tabular-nums outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
+                value={number}
+                onChange={(event) => {
+                  const text = event.target.value;
+                  setDraft(text);
+                  const n = Number(text.trim());
+                  if (text.trim() !== "" && Number.isFinite(n) && n >= props.min) props.onValue({ value: `${Math.round(n * 1000) / 1000}px` });
+                }}
+                onBlur={() => setDraft(null)}
+              />
+              <span aria-hidden className="pointer-events-none absolute right-2 font-mono text-[10px] text-muted-foreground">
+                px
+              </span>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Increase"
+              title="One token up (Shift: +1px)"
+              data-annotate-box-step="1"
+              onClick={(event) => {
+                setDraft(null);
+                props.onStep(1, event.shiftKey);
+              }}
+            >
+              <Plus />
+            </Button>
+            <output data-annotate-value-readout className="sr-only">
+              {props.readout}
+            </output>
           </div>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Increase"
-            title="One token up (Shift: +1px)"
-            data-annotate-box-step="1"
-            onClick={(event) => {
-              setDraft(null);
-              props.onStep(1, event.shiftKey);
-            }}
-          >
-            <Plus />
-          </Button>
-          <output data-annotate-value-readout className="sr-only">
-            {props.readout}
-          </output>
+          {props.onReset && (
+            <Button
+              variant="outline"
+              size="sm"
+              data-annotate-reset
+              aria-label="Reset selected spacing"
+              title="Reset selected spacing"
+              className="h-8 shrink-0 px-2 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                setDraft(null);
+                props.onReset?.();
+              }}
+            >
+              <RotateCcw className="size-3.5" />
+              Reset
+            </Button>
+          )}
         </div>
 
         <div className="flex flex-col gap-1">
